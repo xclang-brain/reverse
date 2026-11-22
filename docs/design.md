@@ -26,8 +26,7 @@ plugin/                              配布するプラグイン
 │   ├── scripts/revdoc.py            スクリプトの入口
 │   ├── scripts/revdoc/              スクリプトの本体
 │   └── templates/                   設計書のひな形
-├── README.md
-└── LICENSE
+└── README.md
 tests/                               スクリプトの自動テストと読み込みのテスト
 evals/                               実際に動かす評価の道具
 docs/                                要求、要件、設計

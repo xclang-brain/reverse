@@ -1,0 +1,12 @@
+{
+  "name": "reverse",
+  "version": "0.1.0",
+  "description": "ソースコードと既存の設計書（PDF）から、AI が読める新しい設計書（Markdown）と、人が読む静的サイトを作る。",
+  "agents": [
+    "./com.github.copilot/agents/code-analyst.agent.md",
+    "./com.github.copilot/agents/pdf-converter.agent.md",
+    "./com.github.copilot/agents/doc-matcher.agent.md",
+    "./com.github.copilot/agents/doc-writer.agent.md",
+    "./com.github.copilot/agents/doc-verifier.agent.md"
+  ]
+}

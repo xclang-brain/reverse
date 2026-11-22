@@ -128,6 +128,7 @@ python revdoc.py next --out <出力先> [--count 4]
 ```
 
 - `tasks` は、最大で `--count` 件。
+- `done` が `false` のときは、`"instruction"` に、次に行うことを英語の1文で入れる（例：`Run every task with its agent in parallel, then call next again. Do not stop until done is true.`）。統括のエージェントが途中で止まらないようにするためである。
 - すべての段階が終わったときは、`{"ok": true, "done": true, "stage": "done", "check_passed": true, "summary": {...}}` を返す。`summary` は、`status` の `summary` と同じ。
 - `init` をしていない出力先では、エラー `not_initialized` を返す。
 
