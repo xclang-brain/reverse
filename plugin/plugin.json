@@ -1,6 +1,0 @@
-{
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "reverse",
-  "version": "0.1.0",
-  "description": "ソースコードと既存の設計書（PDF）から、AI が読める新しい設計書（Markdown）と、人が読む静的サイトを作る。"
-}
