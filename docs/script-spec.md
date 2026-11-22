@@ -221,6 +221,22 @@ python revdoc.py next --out <出力先> [--count 4]
 - `convert` では、ページの画像とテキストのパス、ページの目印の書き方、`zoom` の呼び方。
 - `fix` では、検査で不合格になった項目の一覧。
 
+指示のファイルは、`plugin/skills/make-design-docs/templates/` のひな形から作る。ひな形の `{{名前}}` を、下の表の値に置き換える。置き換えた後に `{{` が残らないこと。
+
+| 種類 | ひな形 | 差し込む値 |
+| --- | --- | --- |
+| すべて | — | `task_id`（仕事の ID）、`src`（ソースコードのフォルダの絶対パス）、`encoding_note`（UTF-8 でないファイルがあるときは「UTF-8 でないファイルは、`<.work/src-utf8 の絶対パス>` に UTF-8 に直した写しがある。文字化けするときは、写しを読む。」の1行。ないときは空） |
+| `analyze` | `task-analyze.md` | `unit_id`、`module_id`、`file_list`（ファイルごとに `- \`<絶対パス>\`（<開始>〜<終了>行）` の1行。UTF-8 でないファイルは、写しの絶対パスにする）、`output`（絶対パス）、`headings`（必須の見出しを1行に1つずつ `- \`## 役割\`` の形で） |
+| `convert` | `task-convert.md` | `pdf_id`、`pdf_title`、`page_start`、`page_end`、`page_rows`（ページごとに `| <番号> | \`<画像の絶対パス>\` | \`<テキストの絶対パス>\` |` の1行）、`output`、`zoom_command`（`"<Python の実行ファイルの絶対パス>" "<revdoc.py の絶対パス>" zoom --out "<出力先>" --pdf <PDF の ID> --page <ページ番号> --region <範囲>`。`<ページ番号>` と `<範囲>` は、この文字のまま残す） |
+| `match` | `task-match.md` | `pdf_title`、`legacy_file`（絶対パス）、`notes_dir`（絶対パス）、`module_list`（モジュールごとに `- \`<ID>\`：<題>` の1行）、`output` |
+| `write_module` | `task-write-module.md` | `module_id`、`module_title`、`note_list`（解析メモごとに `  - \`<絶対パス>\`` の1行）、`match_file_line`（`mode` が `both` のときは `- このモジュールの照合の記録：\`<絶対パス>\`` の1行。それ以外は空）、`file_list`（ファイルごとに `  - \`<絶対パス>\`` の1行）、`design_output`、`functions_output`、`unknowns_output`、`headings`、`fr_prefix`、`module_list` |
+| `verify_module` | `task-verify-module.md` | `module_id`、`module_title`、`design_output`、`functions_output`、`unknowns_output`、`file_list`（ファイルごとに `- \`<絶対パス>\`` の1行）、`output`、`fr_prefix` |
+| `write_architecture` | `task-write-architecture.md` | `digest`、`modules_dir`、`match_file_line`（`mode` が `both` のときは `- 全体に関わる照合の記録：\`<_overall.md の絶対パス>\`` の1行。それ以外は空）、`output`、`unknowns_output`、`headings`、`module_list` |
+| `write_srs` | `task-write-srs.md` | `digest`、`functions_dir`、`modules_dir`、`match_file_line`（上と同じ）、`legacy_line`（`mode` が `both` のときは `- 既存の設計書のフォルダ：\`<docs/legacy の絶対パス>\`` の1行。それ以外は空）、`output_dir`、`unknowns_output`、`input_summary`（`- ソースコード：<フォルダの名前>` と、PDF ごとの `- 既存の設計書：<表示用の名前>` の行） |
+| `fix` | `task-fix.md` | `docs_dir`（`docs` の絶対パス）、`problem_rows`（項目ごとに `| \`<file>\` | \`<rule>\` | <detail> |` の1行） |
+
+- `mode` が `source` のときの `src` 以外で、値がないもの（`mode` が `pdf` のときの `src` など）は、`なし` とする。
+
 ## 4. 担当エージェントが書く記録の形式
 
 ### 4.1 照合の記録
