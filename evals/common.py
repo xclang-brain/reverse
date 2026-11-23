@@ -109,8 +109,13 @@ def read_events(log):
     return events
 
 
+# 呼び直しを認める終わり方（要件の 5.4 の C-1）
+RETRY_REASONS = ("rate_limit", "restart", "api_error")
+
+
 def end_reason(events):
-    """1回の実行の終わり方：finished（終わった）、rate_limit（利用枠の上限）、restart（記録が途中で切れた）、error。"""
+    """1回の実行の終わり方：finished（終わった）、rate_limit（利用枠の上限）、restart（記録が途中で切れた）、
+    api_error（API のエラー。認証、ネットワーク、サーバーの障害）、error（プラグインの動きで止まった）。"""
     rejected = any(e.get("type") == "rate_limit_event" and e.get("rate_limit_info", {}).get("status") == "rejected"
                    for _, e in events)
     results = [e for _, e in events if e.get("type") == "result"]
@@ -121,6 +126,8 @@ def end_reason(events):
         return "finished"
     if last.get("api_error_status") == 429 or LIMIT_TEXT.search(str(last.get("result", ""))) or rejected:
         return "rate_limit"
+    if last.get("terminal_reason") == "api_error":
+        return "api_error"
     return "error"
 
 

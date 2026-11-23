@@ -24,9 +24,9 @@ from bisect import bisect_left
 from functools import partial
 from pathlib import Path
 
-from common import (AGENT_MODEL, FENCE, HEADING, JUDGE_MODEL, REPO, WORD, attempt_logs, body_lines, clean_env,
-                    end_reason, legacy_index, load_json, outside_spans, page_files, paths, read_events, read_text,
-                    result_text, revdoc_command, save_json, spans, split_lines, tool_uses, tree_hashes)
+from common import (AGENT_MODEL, FENCE, HEADING, JUDGE_MODEL, REPO, RETRY_REASONS, WORD, attempt_logs, body_lines,
+                    clean_env, end_reason, legacy_index, load_json, outside_spans, page_files, paths, read_events,
+                    read_text, result_text, revdoc_command, save_json, spans, split_lines, tool_uses, tree_hashes)
 
 SEED = 20261123
 CONDITIONS = {
@@ -269,7 +269,7 @@ class Run:
         hooked = set()   # SR-86 のフックが止めた呼び出しの ID（C-1 の denials に数えない）
         for n, events in self.logs:
             reason = end_reason(events)
-            if reason in ("rate_limit", "restart") and n != self.logs[-1][0]:
+            if reason in RETRY_REASONS and n != self.logs[-1][0]:
                 s["restarts"][reason] = s["restarts"].get(reason, 0) + 1
             pending, calls = set(), {}
             for t, e in events:

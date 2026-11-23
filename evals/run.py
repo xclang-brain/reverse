@@ -11,7 +11,8 @@
 
 回のフォルダは、リポジトリの外に置く。数時間かかるので、端末から切り離して動かす
 （例：setsid nohup python evals/run.py small /tmp/eval/small > /tmp/eval/small.out 2>&1 &）。
-止まったときは、同じ引数で動かすと続きから進む。
+止まったときは、同じ引数で動かすと続きから進む。failed で終わった回のフォルダも、最後の回の終わり方を
+記録から決め直し、呼び直しを認める終わり方（利用枠の上限、再起動、API のエラー）なら、続きから進む。
 
 回のフォルダの中身:
   run.json         設定と、実行の1回ずつの始まり、終わり、終わり方
@@ -29,10 +30,11 @@ import subprocess
 import sys
 import time
 
-from common import (AGENT_MODEL, KINDS, REPO, clean_env, end_reason, load_json, paths, read_events,
+from common import (AGENT_MODEL, KINDS, REPO, RETRY_REASONS, clean_env, end_reason, load_json, paths, read_events,
                     revdoc_command, save_json, tool_uses, tree_hashes)
 
 MAX_ATTEMPTS = 20
+API_ERROR_WAIT = 60   # API のエラーで止まったときに、呼び直す前に待つ秒数
 C12_STOP_AFTER = 3
 
 
@@ -148,6 +150,25 @@ def wait_for_limit(log):
     time.sleep(seconds)
 
 
+def status_after(reason):
+    """回の終わり方から、実行の状態を決める。呼び直しを認める終わり方と C-12 の止めた回では、running のまま続ける。"""
+    if reason == "finished":
+        return "finished"
+    if reason in RETRY_REASONS or reason == "c12_stop":
+        return "running"
+    return "failed"
+
+
+def reopen(info, p):
+    """failed で終わった実行の最後の回の終わり方を、記録から決め直す。呼び直しを認める終わり方なら、running に戻す。"""
+    last = info["attempts"][-1] if info["attempts"] else None
+    if info["status"] != "failed" or not last or last.get("reason") != "error" or len(info["attempts"]) >= MAX_ATTEMPTS:
+        return
+    last["reason"] = end_reason(read_events(p["logs"] / f"attempt-{last['n']}.jsonl"))
+    info["status"] = status_after(last["reason"])
+    save_json(p["run"] / "run.json", info)
+
+
 def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("kind", choices=KINDS)
@@ -166,6 +187,7 @@ def main(argv):
         save_json(p["run"] / "run.json", info)
     if info["kind"] != args.kind:
         sys.exit(f"回のフォルダの種類が違う: {info['kind']}")
+    reopen(info, p)
 
     while info["status"] == "running":
         last = info["attempts"][-1] if info["attempts"] else None
@@ -177,6 +199,9 @@ def main(argv):
             continue
         if last and last["reason"] == "rate_limit":
             wait_for_limit(p["logs"] / f"attempt-{last['n']}.jsonl")
+        if last and last["reason"] == "api_error":
+            say(f"API のエラーのため、{API_ERROR_WAIT} 秒待つ")
+            time.sleep(API_ERROR_WAIT)
         if len(info["attempts"]) >= MAX_ATTEMPTS:
             info["status"] = "failed"
             break
@@ -188,10 +213,7 @@ def main(argv):
         code, stopped = run_attempt(info, p, n, C12_STOP_AFTER if c12 else 0)
         reason = "c12_stop" if stopped else end_reason(read_events(p["logs"] / f"attempt-{n}.jsonl"))
         info["attempts"][-1].update(end=time.time(), returncode=code, reason=reason)
-        if reason == "finished":
-            info["status"] = "finished"
-        elif reason == "error":
-            info["status"] = "failed"
+        info["status"] = status_after(reason)
         say(f"回 {n} の終わり：{reason}（{int((info['attempts'][-1]['end'] - info['attempts'][-1]['start']) // 60)} 分）")
         save_json(p["run"] / "run.json", info)
 
