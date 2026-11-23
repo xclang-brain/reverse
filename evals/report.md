@@ -32,6 +32,8 @@
 | 小さい材料 5回目 | b840a15 | 11 / 12 | C-8 |
 | 小さい材料 6回目 | 6d57772 | 11 / 12 | C-9 |
 | 小さい材料 7回目 | a4c0fba | 8 / 12 | C-2、C-8、C-9、C-10 |
+| 小さい材料 8回目 | 50f4ee1 | 11 / 12 | C-15 |
+| 小さい材料 9回目 | 73b319b | 11 / 12 | C-8 |
 
 ## 回ごとの結果
 
@@ -305,3 +307,69 @@
 記録した数：next: 27、jobs_by_stage: {"analyze": 7, "convert": 3, "write_module": 3, "write_overall": 12, "match": 12, "verify_module": 34, "verify_overall": 20}、verify_rounds: {"verify_module": {"1": 5, "2": 15, "3": 4, "4": 2, "5": 2, "6": 2, "7": 2, "8": 2}, "verify_overall": {"1": 11, "2": 1, "3": 1, "4": 1, "5": 4, "6": 2}}、max_context: 104255、compactions: 0、elapsed_sec: 2098、next_max_sec: 2.2、largest_match_record: 232、next_per_million_lines: 2264、none_sentence_sections: 9、figure_switched: 0、verify_removed: 27
 
 この回の後に直したこと：Mermaid の中のバッククォートを検査する。名前の囲み方を前後のページとそろえる。執筆担当は「既存設計書のみ」の内容を本文に書かない。
+
+### 小さい材料 8回目
+
+- `plugin/` のコミット：50f4ee1b7afa9f65bca324ba55164e9cb37a8030
+- モデル：claude-sonnet-5-5（記録にあったモデル：claude-sonnet-5-5。独立したエージェント：claude-opus-5-5）
+- Claude Code：2.1.330 (Claude Code)
+- 実行：1 回（1：finished）。かかった時間 2465 秒
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-1 | done: true、check: true、problems: 0、failed: {"解析": "0/7", "変換": "0/3", "執筆（モジュール）": "0/3", "執筆（全体）": "0/12", "照合": "0/12", "検証": "0/62"}、questions: 0、denials: 0、hook_blocked: 0、early_next: 0、reply: true、restarts: {}、models: ["claude-sonnet-5-5"] | 合格 |
+| C-2 | lines: 30、facts: 30、correct: 29、no_basis: 0、not_fact: 0、empty_kinds: []、fr_three_yes: "10/10"、tries: 1 | 合格 |
+| C-4 | extern: "54/54"、removed: "14/1318"、missing: [] | 合格 |
+| C-6 | items: 13、complete: 13、sampled: "10/10" | 合格 |
+| C-7 | marked: "9/10"、rows: 87、unverifiable: "9/10" | 合格 |
+| C-8 | rows: 21、not_found: "8/10" | 合格 |
+| C-9 | ok_pages: "9/10" | 合格 |
+| C-10 | pages: "24/24"、mermaid_failed: "0/14"、blocked: 0、words: 3、search: {"メモリ領域": 2, "ソースファイル": 5, "指定可能": 6} | 合格 |
+| C-11 | all: "34526/36337" | 合格 |
+| C-15 | input_changed: 0、plugin_changed: 0、new_files: ["scratch_fix.txt"]、main_file_tools: 0、names_in_plugin: []、agent_tools: []、agents_without_log: 0 | 不合格 |
+
+#### 既知の変更に頼る条件
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-3 | wrong: "5/5"、tries: 1 | 合格 |
+| C-5 | listed: "10/10"、candidates: 224、writes_before: 0 | 合格 |
+
+正解：変えた場所 10 か所（`<`→`<=`、`RUNNING`→`READY`、`UINT_C(0)`→`UINT_C(1)`、`>=`→`>`、`0U`→`1U`、`<`→`<=`、`<=`→`<`、`0U`→`1U`、`maxval + 1U`→`maxval`、`0U`→`1U`）、誤りの文 5 件、既存の設計書にしかない記述 10 件
+
+記録した数：next: 31、jobs_by_stage: {"analyze": 7, "convert": 3, "write_module": 3, "write_overall": 12, "match": 12, "verify_module": 38, "verify_overall": 24}、verify_rounds: {"verify_module": {"1": 4, "2": 19, "3": 5, "4": 2, "5": 2, "6": 2, "7": 2, "8": 2}, "verify_overall": {"1": 11, "2": 1, "3": 1, "4": 6, "5": 5}}、max_context: 111772、compactions: 0、elapsed_sec: 2465、next_max_sec: 1.6、largest_match_record: 195、next_per_million_lines: 2599、none_sentence_sections: 5、figure_switched: 0、verify_removed: 14
+
+この回の後に直したこと：担当エージェントの書き込みを、フックで出力先の中に限る（解析担当が、作業フォルダに関係のないファイルを1つ作ったため）。採点で、フックが止めた書き込みを、許可を断られた呼び出しに数えない。
+
+### 小さい材料 9回目
+
+- `plugin/` のコミット：73b319bc4eb4639886f1087f342ef27cdcf19e4e
+- モデル：claude-sonnet-5-5（記録にあったモデル：claude-sonnet-5-5。独立したエージェント：claude-opus-5-5）
+- Claude Code：2.1.330 (Claude Code)
+- 実行：1 回（1：finished）。かかった時間 2649 秒
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-1 | done: true、check: true、problems: 0、failed: {"解析": "0/7", "変換": "0/3", "執筆（モジュール）": "0/3", "執筆（全体）": "0/12", "照合": "0/12", "検証": "0/58"}、questions: 0、denials: 0、hook_blocked: 0、early_next: 0、reply: true、restarts: {}、models: ["claude-sonnet-5-5"] | 合格 |
+| C-2 | lines: 30、facts: 30、correct: 29、no_basis: 0、not_fact: 0、empty_kinds: []、fr_three_yes: "8/10"、tries: 1 | 合格 |
+| C-4 | extern: "54/54"、removed: "7/1314"、missing: [] | 合格 |
+| C-6 | items: 14、complete: 14、sampled: "10/10" | 合格 |
+| C-7 | marked: "9/10"、rows: 89、unverifiable: "8/10" | 合格 |
+| C-8 | rows: 8、not_found: "5/8" | 不合格 |
+| C-9 | ok_pages: "9/10" | 合格 |
+| C-10 | pages: "24/24"、mermaid_failed: "0/14"、blocked: 0、words: 3、search: {"リンク": 1, "タイミングチャート": 2, "最高優先度": 4} | 合格 |
+| C-11 | all: "35255/36936" | 合格 |
+| C-15 | input_changed: 0、plugin_changed: 0、new_files: []、main_file_tools: 0、names_in_plugin: []、agent_tools: []、agents_without_log: 0 | 合格 |
+
+#### 既知の変更に頼る条件
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-3 | wrong: "5/5"、tries: 1 | 合格 |
+| C-5 | listed: "10/10"、candidates: 182、writes_before: 0 | 合格 |
+
+正解：変えた場所 10 か所（`<`→`<=`、`RUNNING`→`READY`、`UINT_C(0)`→`UINT_C(1)`、`>=`→`>`、`0U`→`1U`、`<`→`<=`、`<=`→`<`、`0U`→`1U`、`maxval + 1U`→`maxval`、`0U`→`1U`）、誤りの文 5 件、既存の設計書にしかない記述 10 件
+
+記録した数：next: 31、jobs_by_stage: {"analyze": 7, "convert": 3, "write_module": 3, "write_overall": 12, "match": 12, "verify_module": 33, "verify_overall": 25}、verify_rounds: {"verify_module": {"1": 5, "2": 16, "3": 4, "4": 2, "5": 2, "6": 1, "7": 2, "8": 1}, "verify_overall": {"1": 14, "2": 1, "3": 6, "4": 4}}、max_context: 110000、compactions: 0、elapsed_sec: 2649、next_max_sec: 2.0、largest_match_record: 233、next_per_million_lines: 2599、none_sentence_sections: 5、figure_switched: 0、verify_removed: 7
+
+この回の後に直したこと：不明の判定は、別の検証担当がもう一度確かめ、2回続いたときに行を消す。
