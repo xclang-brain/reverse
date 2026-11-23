@@ -6,7 +6,7 @@ from .scriptwork import PAGE_MARK
 from .state import Ctx
 
 NEW_DOCS = ("docs/design/", "docs/requirements/")
-LEGACY_RULES = ("bad_table", "bad_tag", "double_underscore")
+LEGACY_RULES = ("bad_table", "bad_tag", "double_underscore", "bare_name")
 
 
 def _skipped(ctx):

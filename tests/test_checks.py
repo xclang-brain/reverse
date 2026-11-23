@@ -180,6 +180,13 @@ CONVERT_CASES = [
     pytest.param([("タスクの状態を示す。", "| a | b |")], "bad_table", id="table_one_line"),
     pytest.param([("タスクの状態を示す。", "<b>タスク</b>の状態を示す。")], "bad_tag", id="tag"),
     pytest.param([("タスクの状態を示す。", "タスク__状態を示す。")], "double_underscore", id="double_underscore"),
+    pytest.param([("タスクの状態を示す。", "tnum_task の状態を示す。")], "bare_name", id="bare_name_underscore"),
+    pytest.param([("タスクの状態を示す。", "TaskId の状態を示す。")], "bare_name", id="bare_name_camel"),
+    # 識別子の形でない語（大文字だけ、先頭だけ大文字、英字のない語）と、コードスパン、コードブロック、`](` を含む行は当たらない
+    pytest.param([("タスクの状態を示す。", "TASK と Task と 1_000 の状態を示す。")], None, id="not_bare_name"),
+    pytest.param([("タスクの状態を示す。", "`tnum_task` と `TaskId` の状態を示す。\n\n```c\nint tnum_task = TaskId;\n```")],
+                 None, id="bare_name_in_code"),
+    pytest.param([(FIG, "![TaskId の図 tnum_task](figure:0.1, 0.2, 0.9, 0.5)")], None, id="bare_name_in_link_line"),
     pytest.param([(FIG, "![図 1](figure:0.9,0.2,0.1,0.5)")], "bad_figure", id="figure_x_order"),
     pytest.param([(FIG, "![図 1](figure:0.1,0.2,0.9,1.5)")], "bad_figure", id="figure_over_1"),
     pytest.param([(FIG, "![図 1](figure:0.1,0.2,0.9)")], "bad_figure", id="figure_three_values"),

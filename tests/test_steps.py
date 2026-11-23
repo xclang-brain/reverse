@@ -386,7 +386,7 @@ def test_assemble_split(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_match_split(tmp_path):
-    """A-8：照合の仕事は、docs/legacy/ の本文の行を、見出しの切れ目で 50 行までに分けたものになり、同じ行の仕事が2つずつできる。代わりの関数は、2つ目の仕事にも出力を書く（SR-41、SR-83。5.6、8.2）。"""
+    """A-8：照合の仕事は、docs/legacy/ の本文を、見出しの切れ目で 50 個までに分けたものになり、同じ行の仕事が2つずつできる。代わりの関数は、2つ目の仕事にも出力を書く（SR-41、SR-83。5.6、8.2）。"""
     pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
     out = _start(tmp_path, "convert", pdf=pdf)
     job = helpers.jobs_with(out, status="issued", kind="convert")[0]
@@ -417,6 +417,60 @@ def test_match_split(tmp_path):
     # 代わりの関数は、2つ目の仕事にも出力を書き、どれも検査に合格する。
     _drive(out, until="write_module")
     assert [j["status"] for j in helpers.jobs_with(out, kind="match")] == ["done"] * 10
+
+
+# 文に分ける行と、分けない行（5.6）。(ページの行, 番号を振る文のリスト)
+SENTENCE_ROWS = [
+    ("タスクは，並行に実行する．タスクには，優先度を付ける。", ["タスクは，並行に実行する．", "タスクには，優先度を付ける。"]),
+    ("`a。b` の中は分けない。後ろの文である。", ["`a。b` の中は分けない。", "後ろの文である。"]),  # コードスパンの中は切れ目でない
+    ("行末で終わる文である。", ["行末で終わる文である。"]),  # 後ろに文字が残らないので分けない
+    ("- 箇条書きの1文目である。2文目である。", ["- 箇条書きの1文目である。", "2文目である。"]),
+    ("| 表の行である。 | 分けない。 |", ["| 表の行である。 | 分けない。 |"]),
+    ("![図 A](figure:0.1,0.1,0.9,0.3)", ["![図 A](fig/p0001-1.png)"]),
+    ("図の説明：図の1文目である。図の2文目である。", ["図の説明：図の1文目である。図の2文目である。"]),
+    ("```c\nint a; /* 一。二。 */\n```", ["```c\nint a; /* 一。二。 */\n```"]),
+]
+
+
+def test_match_sentences(tmp_path):
+    """A-8：照合では、段落と箇条書きの項目を、コードスパンの外の「。」と「．」のすぐ後ろで文に分け、文ごとに番号を振る。表の行、コードブロック、画像の行、図の説明は分けない。仕事の上限の 50 は、文で数える（SR-41。5.6）。"""
+    pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
+    out = _start(tmp_path, "convert", pdf=pdf)
+    job = helpers.jobs_with(out, status="issued", kind="convert")[0]
+    rows = [r for r, _ in SENTENCE_ROWS]
+    page1 = "\n\n".join(["## A"] + rows[:4] + ["| 列 | 値 |\n| --- | --- |\n" + rows[4]] + rows[5:])
+    # 行で数えると 8 + 20 + 10 行で、仕事は1つになる。文で数えると 11、40、20 個で、仕事は3つになる。
+    b_rows = ["B の1文目 %d である。B の2文目 %d である。" % (k, k) for k in range(1, 21)]
+    c_rows = ["C の1文目 %d である。C の2文目 %d である。" % (k, k) for k in range(1, 11)]
+    page2 = "\n\n".join(["## B"] + b_rows + ["## C"] + c_rows)
+    for rel, text in zip(job["outputs"], [page1, page2]):
+        _write(out, rel, text + "\n")
+    assert helpers.revdoc("next", out).ok and helpers.read_state(out)["stage"] == "match"
+
+    legacy = _file_lines(Path(out) / "docs" / "legacy" / "spec" / "001.md")
+    jobs = helpers.jobs_with(out, kind="match")
+    match = Path(out) / ".work" / "match"
+    infos = [helpers.read_json(match / (j["id"] + ".json")) for j in jobs[:len(jobs) // 2]]
+    assert [i["count"] for i in infos] == [11, 40, 20], [j["target"] for j in jobs]
+
+    def line_of(row):
+        first = row.split("\n")[0].replace("figure:0.1,0.1,0.9,0.3", "fig/p0001-1.png")
+        return legacy.index(first) + 1
+
+    def two(rows, page):  # 2文の行は、1つ目の「。」のすぐ後ろで分かれる。1つの行の文は、同じ line を持つ
+        return [(line_of(r), x, page) for r in rows for x in (r[:r.index("。") + 1], r[r.index("。") + 1:])]
+
+    expected = [(line_of(r), x, 1) for r, sentences in SENTENCE_ROWS for x in sentences]
+    for info, exp in zip(infos, [expected, two(b_rows, 2), two(c_rows, 2)]):
+        assert info["file"] == "docs/legacy/spec/001.md"
+        assert [(e["n"], e["line"], e["text"], e["page"]) for e in info["lines"]] == \
+            [(n, line, text, page) for n, (line, text, page) in enumerate(exp, 1)]
+
+    # 番号を振った行のファイルには、1文を1行で書く。表の見出しの行と区切りの行は、そのまま書く。
+    lines_md = helpers.read_text(match / (jobs[0]["id"] + ".lines.md")).rstrip("\n").split("\n")
+    numbered = ["[%d] %s" % (n, text) for n, (_, text, _) in enumerate(expected, 1)]
+    assert lines_md == (["# docs/legacy/spec/001.md", "## A"] + numbered[:7] + ["| 列 | 値 |", "| --- | --- |"]
+                        + numbered[7:10] + numbered[10].split("\n"))
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +504,7 @@ def _part_job(out, target):
 
 
 def test_distribute_records(tmp_path):
-    """A-8：照合の記録が、部分ごと、全体、records.json に振り分けられ、「一致」の範囲の Mermaid の図がモジュールの照合の記録に載り、照合していない範囲が一覧に載る。2つ目の仕事の記録からは、1つ目の「食い違い」と番号が重ならない「食い違い」だけが、1つ目の記録の間に入る（SR-44、SR-46、SR-81、SR-83）。"""
+    """A-8：照合の記録が、部分ごと、全体、records.json に振り分けられ、「一致」の範囲の Mermaid の図がモジュールの照合の記録に載り、照合していない範囲が一覧に載る。2つ目の仕事の記録からは、1つ目の「食い違い」と番号が重ならない「食い違い」だけが、1つ目の記録の間に入る。1つ目の「既存設計書のみ」の記録は、全部の番号が2つ目の「一致」に入るときだけ使われない（SR-44、SR-46、SR-81、SR-83）。"""
     out, job, t = _match_start(tmp_path)
     mj = job["id"]
     seconds = [j["id"] for j in helpers.jobs_with(out, kind="match") if j["target"] == job["target"] + "#2"]
@@ -458,21 +512,26 @@ def test_distribute_records(tmp_path):
     mj2 = seconds[0]
     # 0 番があり、8 番を覆わない記録。3回とも bad_cover で失敗になり、合格する記録だけが使われる（8.3 の 1）。
     record = ("## 0 対象外\n\n" + DISCREPANCY
-              + "## 2-3 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n" % (t[2], t[3])
+              + "## 2 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n" % t[2]
+              + "## 3 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n" % t[3]
               + "## 4 一致\n- 場所: [kernel/task.c:1-7]\n\n"
               + "## 5 食い違い\n- 場所: [lib/timer.cpp:4-7]\n- 名前: Timer::method_0001\n"
               + "- 既存の設計書: 倍率は 2 である。\n- ソースコード: 倍率は 1 である。\n\n"
               + "## 6-7 既存設計書のみ\n- モジュール: 全体\n- 内容:\n\n%s\n\n%s\n" % (t[6], t[7]))
-    # 2つ目の仕事の記録。使うのは 3 の「食い違い」だけである。
-    # 1 は1つ目の「食い違い」と番号が重なる。4 と 6-8 は「食い違い」でない。
+    # 2つ目の仕事の記録。食い違いとして使うのは 4 の「食い違い」だけである。
+    # 1 は1つ目の「食い違い」と番号が重なる。6 は「食い違い」でない。
+    # 3 の「一致」は、1つ目の 3 の「既存設計書のみ」を全部覆うので、その記録は使わない（8.3 の 1）。
+    # 7 の「一致」は、1つ目の 6-7 の「既存設計書のみ」の一部だけを覆うので、その記録は使う。
     record2 = ("## 1 食い違い\n- 場所: [kernel/task.c:300-300]\n- 名前: TerminateTask\n"
                "- 既存の設計書: 重なる記録である。\n- ソースコード: 重なる記録である。\n\n"
                "## 2 対象外\n\n"
-               "## 3 食い違い\n- 場所: [kernel/task.c:3-3]\n- 名前: task_count\n"
+               "## 3 一致\n- 場所: [kernel/task.c:1-7]\n\n"
+               "## 4 食い違い\n- 場所: [kernel/task.c:3-3]\n- 名前: task_count\n"
                "- 既存の設計書: 初期値は 1 である。\n- ソースコード: 初期値は 0 である。\n\n"
-               "## 4 一致\n- 場所: [kernel/task.c:1-7]\n\n"
                "## 5 対象外\n\n"
-               + "## 6-8 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n%s\n" % (t[6], t[7], t[8]))
+               + "## 6 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n" % t[6]
+               + "## 7 一致\n- 場所: [kernel/task.c:1-7]\n\n"
+               "## 8 対象外\n")
     _write(out, _job(out, mj2)["outputs"][0], record2)
     for _ in range(3):
         _write(out, job["outputs"][0], record)
@@ -512,7 +571,8 @@ def test_distribute_records(tmp_path):
     # 画像の行のパスは、差し込む先の設計書からの相対パスになる（8.3 の 5）。
     k_legacy = _file_lines(work / (kj + ".legacy.md"))
     assert k_legacy[0] == "# 照合の記録（kernel。既存設計書のみ）"
-    assert _nonempty(k_legacy[1:]) == ["### E0001", "![ページ 1 の図](../../legacy/spec/fig/p0001-1.png)", t[3]]
+    # 3 の記録は使わないので、E0001 は 2 の図だけになり、次の番号は 6-7 の記録に付く。
+    assert _nonempty(k_legacy[1:]) == ["### E0001", "![ページ 1 の図](../../legacy/spec/fig/p0001-1.png)"]
     l_legacy = _file_lines(work / (lj + ".legacy.md"))
     assert _nonempty(l_legacy[1:]) == ["なし"]
     overall = _file_lines(work / "overall.md")
@@ -542,6 +602,26 @@ def test_distribute_records(tmp_path):
     assert c["passed"] is True and c["failed_jobs"] == 1, c
 
 
+def _second(out, job):
+    """同じ行の2つ目の照合の仕事。"""
+    return next(j for j in helpers.jobs_with(out, kind="match") if j["target"] == job["target"] + "#2")
+
+
+def test_agreed_legacy_figure(tmp_path):
+    """A-8：2つ目の仕事が全部を「一致」とした「既存設計書のみ」の記録は使わず、その範囲の Mermaid の図は、2つ目の仕事の「一致」の場所で、一致した図に載る（SR-81、SR-83）。"""
+    out, job, t = _match_start(tmp_path)
+    assert t[8].startswith("```mermaid"), t
+    _write(out, job["outputs"][0], DISCREPANCY + "## 2-7 対象外\n\n"
+           + "## 8 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n" % t[8])
+    _write(out, _second(out, job)["outputs"][0], "## 1-7 対象外\n\n## 8 一致\n- 場所: [lib/timer.cpp:4-7]\n")
+    r = helpers.revdoc("next", out)
+    assert r.ok and helpers.read_state(out)["stage"] == "write_module", r.data
+    work = Path(out) / ".work" / "records"
+    assert helpers.read_json(work / "records.json")["legacy_only"] == []
+    lib = _file_lines(work / (_part_job(out, "lib")["id"] + ".md"))
+    assert _between(lib, "## 一致した図") == ["### lib/timer.cpp"] + t[8].split("\n")
+
+
 def _big(k):
     return ["大きい記録 %d の行 %d。" % (k, i) for i in range(1, 601)]
 
@@ -560,6 +640,8 @@ def test_legacy_only_inserted(tmp_path):
               + "## 6-7 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n%s\n\n" % (t[6], t[7], "\n".join(_big(1)))
               + "## 8 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n" % (t[8], "\n".join(_big(2))))
     _write(out, job["outputs"][0], record)
+    # 2つ目の仕事は、8 を「一致」にしない。8 の記録を使うためである（8.3 の 1）。
+    _write(out, _second(out, job)["outputs"][0], "## 1-8 対象外\n")
     # kernel の内部設計書に、一致した図（t[4]）と、一致した図でない Mermaid の図（D_BLOCK）を書く。
     _drive(out, until="write_module")
     helpers.fake_agent(out)
@@ -1118,7 +1200,7 @@ def test_unknowns_split_boundary(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_check_finds_problems(tmp_path):
-    """A-8：done の後に決まりに反するように docs/ を書き換えると、check が、ファイルと検査の名前を付けて不合格を返す。推測の6つの言い回しは、どれも不合格になり、docs/legacy/ の語とモジュールの名前の語は、名前の検査に合格する（SR-58、SR-65、SR-69）。"""
+    """A-8：done の後に決まりに反するように docs/ を書き換えると、check が、ファイルと検査の名前を付けて不合格を返す。docs/legacy/ には、変換の形式の検査（bare_name を含む）を当てる。推測の6つの言い回しは、どれも不合格になり、docs/legacy/ の語とモジュールの名前の語は、名前の検査に合格する（SR-58、SR-65、SR-69）。"""
     pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
     src = helpers.make_source_tree(tmp_path / "src", dict(LAYOUT, **{"main.c": 10}))  # main.c はモジュール _root になる
     out = tmp_path / "out"
@@ -1143,7 +1225,7 @@ def test_check_finds_problems(tmp_path):
          "## 役割\n\n" + "\n".join(guesses) + "\n\n### `s1`\n\n### `_root`\n")
     kernel = _file_lines(docs / "design" / "modules" / "kernel.md")
     guess_lines = [kernel.index(x) + 1 for x in guesses]
-    edit("legacy/spec/001.md", "<!-- page: 1 -->\n", "<!-- page: 1 -->\n\n本文に __ がある。\n")
+    edit("legacy/spec/001.md", "<!-- page: 1 -->\n", "<!-- page: 1 -->\n\n本文に __ がある。\n\n本文に tnum_task がある。\n")
     edit("requirements/3-1-functions/kernel.md", "## 機能の要求\n",
          "## 機能の要求\n\n- FR-KERNEL-901: `ActivateTask` を呼ぶ。\n- FR-KERNEL-901: `ActivateTask` を呼ぶ。\n")
     edit("design/modules/lib.md", "# lib\n", "# lib\n\n```mermaid\nflowchart LR\n    a -->|yes| b\n```\n")
@@ -1155,6 +1237,7 @@ def test_check_finds_problems(tmp_path):
     assert {(p["file"], p["rule"]) for p in c["problems"]} == {
         ("docs/design/modules/kernel.md", "speculation"),
         ("docs/legacy/spec/001.md", "double_underscore"),
+        ("docs/legacy/spec/001.md", "bare_name"),
         ("docs/requirements/3-1-functions/kernel.md", "duplicate_id"),
         ("docs/design/modules/lib.md", "bad_mermaid"),
         ("docs/design/architecture.md", "unknown_name"),

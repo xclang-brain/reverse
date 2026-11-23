@@ -14,12 +14,13 @@ _NUM = r"([0-9]+(?:\.[0-9]+)?)"
 _FIGURE = re.compile(r"!\[(.*)\]\(figure:%s,\s*%s,\s*%s,\s*%s\)" % (_NUM, _NUM, _NUM, _NUM))
 _SEPARATOR_CELL = re.compile(r":?-+:?")
 _TAG = re.compile(r"<[A-Za-z/!?]")
+_LETTER = re.compile(r"[A-Za-z]")
+_CAMEL = re.compile(r"[a-z][A-Z]")
 _FIGURE_VALUE = re.compile(r"\(figure:[^)]*\)")
 _RECORD = re.compile(r"## ([0-9]+)(?:-([0-9]+))? (一致|食い違い|既存設計書のみ|対象外)")
 _VERDICT = re.compile(r"\[([0-9]+)\]")
 _REQUIREMENT = re.compile(r"\s*- (?:%s)\S*?: " % "|".join(values.REQUIREMENT_HEADS))
 
-FIGURE_NOTE = "図の説明："
 OVERALL = "全体"
 RECORD_KEYS = {"一致": ("場所",), "食い違い": ("場所", "名前", "既存の設計書", "ソースコード"),
                "既存設計書のみ": ("モジュール", "内容"), "対象外": ()}
@@ -130,7 +131,7 @@ def figures(lines, elems):
             detail = "図の題が空である。"
         elif not (0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1):
             detail = "図の範囲の値が、0 ≤ x0 < x1 ≤ 1、0 ≤ y0 < y1 ≤ 1 を満たさない。"
-        elif not nxt.strip().startswith(FIGURE_NOTE):
+        elif not nxt.strip().startswith(values.FIGURE_NOTE):
             detail = "図の行の次の段落が `図の説明：` で始まらない。"
         else:
             detail = None
@@ -148,10 +149,7 @@ def padded(box):
 def split_cells(row):
     """表の行を、コードスパンの外で、前に \\ がない | で区切る。(セルのリスト, | で終わるか) を返す。"""
     s = row.strip()
-    ticks = [i for i, c in enumerate(s) if c == "`"]
-    inside = set()
-    for a, b in zip(ticks[0::2], ticks[1::2]):
-        inside.update(range(a, b + 1))
+    inside = markdown.span_positions(s)
     cells, cur, closed = [], "", False
     for i, c in enumerate(s):
         if c == "|" and i not in inside and (i == 0 or s[i - 1] != "\\"):
@@ -191,6 +189,11 @@ def _table_problems(lines, elems):
     return found
 
 
+def _bare_name(word):
+    """識別子の形の語（6.2 の bare_name）か。"""
+    return ("_" in word and _LETTER.search(word)) or _CAMEL.search(word)
+
+
 def format_problems(lines, elems):
     """形式の検査（6.2）。(行番号, 検査の名前, 説明) のリストを返す。"""
     found = _table_problems(lines, elems)
@@ -200,6 +203,9 @@ def format_problems(lines, elems):
             found.append((k + 1, "bad_tag", "バッククォートの外に、`<br>` のほかのタグがある。"))
         if "__" in text:
             found.append((k + 1, "double_underscore", "バッククォートの外に `__` がある。"))
+        if "](" not in line and any(_bare_name(w) for w in markdown.WORD.findall(text)):
+            found.append((k + 1, "bare_name", "バッククォートの外に、識別子の形の語（`_` を含む語、途中に大文字がある語）がある。"
+                                               "バッククォートで囲む。"))
     found += [(k + 1, "bad_figure", d) for k, _, _, d in figures(lines, elems) if d]
     found += [(n, "bad_mermaid", d) for n, _, d in markdown.mermaid_problems(lines, elems)]
     return found
@@ -220,7 +226,7 @@ def _extra_text(lines, elems):
         lines[first_head] = " "
     k = 0
     while k < len(lines):
-        if lines[k].strip().startswith(FIGURE_NOTE):
+        if lines[k].strip().startswith(values.FIGURE_NOTE):
             while k < len(lines) and lines[k].strip():
                 lines[k] = " "
                 k += 1

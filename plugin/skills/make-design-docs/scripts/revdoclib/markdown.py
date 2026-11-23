@@ -292,15 +292,40 @@ def sentence_problems(line):
 # 5.6 番号を振った行
 # ---------------------------------------------------------------------------
 
-def split_numbered(elems, targets, limit):
-    """対象にする行（targets。elems の要素の集まり）を、節の切れ目で limit 行までの仕事に分ける。"""
+# 番号を振る1個（照合では文、検証では行）。elem は、それがある要素。
+Row = collections.namedtuple("Row", "elem text")
+
+
+def span_positions(line):
+    """コードスパン（対になるバッククォートとその間）の文字の位置の集まり。"""
+    ticks = [i for i, c in enumerate(line) if c == "`"]
+    return {i for a, b in zip(ticks[0::2], ticks[1::2]) for i in range(a, b + 1)}
+
+
+def sentences(lines, e):
+    """要素を文に分けた Row のリスト。段落と箇条書きの項目だけを、コードスパンの外の文の終わりのすぐ後ろで分ける。"""
+    text = elem_text(lines, e)
+    s = text.strip()
+    if e.kind != "text" or IMAGE_LINE.fullmatch(s) or s.startswith(values.FIGURE_NOTE):
+        return [Row(e, text)]
+    inside = span_positions(text)
+    found, start = [], 0
+    for i, c in enumerate(text):
+        if c in values.SENTENCE_ENDS and i not in inside and text[i + 1:].strip():
+            found.append(Row(e, text[start:i + 1]))
+            start = i + 1
+    return found + [Row(e, text[start:])]
+
+
+def split_numbered(elems, rows, limit):
+    """番号を振る Row（rows。対象にする要素から、その Row のリストへの辞書）を、節の切れ目で limit 個までの仕事に分ける。"""
     sections, cur = [], []
     for e in elems:
         if e.kind == "heading":
             sections.append(cur)
             cur = []
-        elif e in targets:
-            cur.append(e)
+        elif e in rows:
+            cur += rows[e]
     sections.append(cur)
     jobs, cur = [], []
     for sec in sections:
@@ -317,8 +342,8 @@ def split_numbered(elems, targets, limit):
 
 
 def write_numbered(out, folder, job_id, rel, lines, elems, chunk, extra):
-    """番号を振った行の2つのファイルを書く。extra は、行の要素を受け取り、JSON の項目に足す値を返す関数。"""
-    first, last = chunk[0], chunk[-1]
+    """番号を振った行の2つのファイルを書く。chunk は Row のリスト。extra は、要素を受け取り、JSON の項目に足す値を返す関数。"""
+    first, last = chunk[0].elem, chunk[-1].elem
     head = ["# " + rel]
     before = [e for e in elems if e.start < first.start]
     heading = next((e for e in reversed(before) if e.kind == "heading"), None)
@@ -327,16 +352,17 @@ def write_numbered(out, folder, job_id, rel, lines, elems, chunk, extra):
     if first.kind == "table_row":
         table_head = next(e for e in reversed(before) if e.kind == "table_head")
         head += [lines[table_head.start], lines[table_head.start + 1]]
-    numbers = {e.start: n for n, e in enumerate(chunk, 1)}
+    numbers = {}
+    for n, r in enumerate(chunk, 1):
+        numbers.setdefault(r.elem.start, []).append("[%d] %s" % (n, r.text.split("\n")[0]))
     body = []
     for k in range(first.start, last.end + 1):
-        if not lines[k].strip():
-            continue
-        body.append(("[%d] " % numbers[k] if k in numbers else "") + lines[k])
+        if lines[k].strip():
+            body += numbers.get(k, [lines[k]])
     base = os.path.join(out, *folder.split("/"))
     files.write_text(os.path.join(base, job_id + ".lines.md"), "".join(x + "\n" for x in head + body))
-    entries = [dict({"n": n, "line": e.start + 1, "text": elem_text(lines, e)}, **extra(e))
-               for n, e in enumerate(chunk, 1)]
+    entries = [dict({"n": n, "line": r.elem.start + 1, "text": r.text}, **extra(r.elem))
+               for n, r in enumerate(chunk, 1)]
     files.write_text(os.path.join(base, job_id + ".json"),
                      files.dumps({"file": rel, "count": len(chunk), "lines": entries}))
 

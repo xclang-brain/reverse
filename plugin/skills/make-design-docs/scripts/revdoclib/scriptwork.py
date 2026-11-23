@@ -127,7 +127,7 @@ def _add_job(ctx, kind, rel, chunk, suffix=""):
     """仕事を状態の最後に足す。target は <docs/ からのパス>:<最初の番号の行の行番号><suffix>。"""
     st = ctx.state
     job = init.job_entry({"id": "J%05d" % st["next_job"], "kind": kind,
-                          "target": "%s:%d%s" % (rel[len("docs/"):], chunk[0].start + 1, suffix)}, st["stage"])
+                          "target": "%s:%d%s" % (rel[len("docs/"):], chunk[0].elem.start + 1, suffix)}, st["stage"])
     st["next_job"] += 1
     st["jobs"].append(job)
     return job["id"]
@@ -147,9 +147,9 @@ def make_match_jobs(ctx):
                 m = PAGE_MARK.fullmatch(lines[e.start].strip()) if e.kind == "comment" else None
                 page = int(m.group(1)) if m else page
                 pages[e.start] = page
-            body = {e for e in elems if e.kind in markdown.BODY}
+            rows = {e: markdown.sentences(lines, e) for e in elems if e.kind in markdown.BODY}
             chunks += [(rel, lines, elems, chunk, pages)
-                       for chunk in markdown.split_numbered(elems, body, values.NUMBERED_LINES)]
+                       for chunk in markdown.split_numbered(elems, rows, values.NUMBERED_LINES)]
     for k in range(1, values.MATCH_COUNT + 1):
         for rel, lines, elems, chunk, pages in chunks:
             job_id = _add_job(ctx, "match", rel, chunk, "#%d" % k if k > 1 else "")
@@ -192,15 +192,24 @@ def _legacy_file(title, recs):
     return lines if recs else lines + ["なし"]
 
 
+def _numbers(rec):
+    return set(range(rec["start"], rec["end"] + 1))
+
+
+def _passed(ctx, job, info, cats):
+    """仕事の記録のうち、その記録だけで検査（bad_cover を除く）に合格する、cats の分類のもの。"""
+    rel = job["outputs"][0]
+    return [rec for rec in (jobchecks.read_records(ctx, rel, info)[1] if os.path.isfile(ctx.abs(rel)) else [])
+            if rec["start"] is not None and not rec["problems"] and rec["start"] >= 1
+            and rec["end"] <= info["count"] and rec["cat"] in cats]
+
+
 def _usable(ctx, job, info, taken, cats):
     """仕事の記録のうち、使うもの（8.3 の 1）。taken は使った番号で、使った記録の番号を足す。"""
-    rel = job["outputs"][0]
     found = []
-    for rec in jobchecks.read_records(ctx, rel, info)[1] if os.path.isfile(ctx.abs(rel)) else []:
-        numbers = set(range(rec["start"], rec["end"] + 1)) if rec["start"] is not None else set()
-        if (numbers and not rec["problems"] and rec["start"] >= 1 and rec["end"] <= info["count"]
-                and not numbers & taken and rec["cat"] in cats):
-            taken |= numbers
+    for rec in _passed(ctx, job, info, cats):
+        if not _numbers(rec) & taken:
+            taken |= _numbers(rec)
             found.append(rec)
     return found
 
@@ -218,9 +227,15 @@ def distribute(ctx):
         used = set()
         records = _usable(ctx, job, info, used, jobchecks.RECORD_KEYS)
         disc = [(job, r) for r in records if r["cat"] == "食い違い"]
-        taken = {n for _, r in disc for n in range(r["start"], r["end"] + 1)}
+        taken = {n for _, r in disc for n in _numbers(r)}
         for other in jobs[n_lines + i::n_lines]:
             disc += [(other, r) for r in _usable(ctx, other, info, taken, ("食い違い",))]
+        # 2つ目の仕事が全部を「一致」とした「既存設計書のみ」の記録は、使わない。
+        # その番号は、2つ目の仕事の「一致」の記録として扱う（SR-83）。
+        agreed = {n: r for r in _passed(ctx, jobs[n_lines + i], info, ("一致",)) for n in _numbers(r)}
+        records = [x for r in records for x in
+                   ([{**agreed[n], "start": n, "end": n} for n in sorted(_numbers(r))]
+                    if r["cat"] == "既存設計書のみ" and _numbers(r) <= agreed.keys() else [r])]
         for owner, rec in sorted(disc, key=lambda x: x[1]["start"]):
             path, v = rec["location"][0], rec["values"]
             module, part = _part_of(plan, path)
@@ -399,7 +414,8 @@ def _make_verify_jobs(ctx):
     for rel in verify_files(ctx):
         lines, elems, rows = _targets(ctx, rel)
         sha = {e: h for e, _, h in rows}
-        for chunk in markdown.split_numbered(elems, set(sha), values.NUMBERED_LINES):
+        rows = {e: [markdown.Row(e, markdown.elem_text(lines, e))] for e in sha}
+        for chunk in markdown.split_numbered(elems, rows, values.NUMBERED_LINES):
             job_id = _add_job(ctx, "verify", rel, chunk)
             markdown.write_numbered(ctx.out, ".work/verify", job_id, rel, lines, elems, chunk,
                                     lambda e: {"sha1": sha[e]})
