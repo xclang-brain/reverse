@@ -174,6 +174,16 @@ class Run:
                     rows.append({"cat": cat, "file": rel, "line": n, "text": text})
         return rows
 
+    def table_header(self, row):
+        """表の行なら、その表の見出しの行を返す。"""
+        lines = split_lines(read_text(self.docs / row["file"]))
+        n = row["line"] - 1
+        if not lines[n].strip().startswith("|"):
+            return None
+        while n > 0 and lines[n - 1].strip().startswith("|"):
+            n -= 1
+        return lines[n]
+
     def legacy_pages(self):
         """既存の設計書の Markdown を、ページごとにまとめる（最初の PDF）。"""
         pages, page = {}, 0
@@ -254,7 +264,8 @@ class Run:
         s = {"questions": 0, "denials": 0, "early_next": 0, "next": 0, "next_max_sec": 0, "compactions": 0,
              "max_context": 0, "main_file_tools": 0, "agent_tool_misuse": [], "agents_without_log": 0,
              "models": set(), "serve": None, "final": "", "restarts": {}}
-        agents = {}   # Agent の呼び出しの ID → [種類, 子のツールの名前, セッションの ID, 担当の ID]
+        agents = {}   # Agent の呼び出しの ID → [種類, 子のツールの (呼び出しの ID, 名前), セッションの ID, 担当の ID]
+        no_tool = set()   # ツールがないと断られた呼び出しの ID（C-15 で数えない）
         for n, events in self.logs:
             reason = end_reason(events)
             if reason in ("rate_limit", "restart") and n != self.logs[-1][0]:
@@ -280,7 +291,7 @@ class Run:
                         name, args = b.get("name"), b.get("input") or {}
                         calls[b.get("id")] = (name, args, t)
                         if parent:
-                            agents.setdefault(parent, ["?", [], None, None])[1].append(name)
+                            agents.setdefault(parent, ["?", [], None, None])[1].append((b.get("id"), name))
                             continue
                         if name == "AskUserQuestion":
                             s["questions"] += 1
@@ -294,6 +305,8 @@ class Run:
                             s["main_file_tools"] += 1
                     elif b.get("type") == "tool_result":
                         text = result_text(b)
+                        if b.get("is_error") and "No such tool available" in text:
+                            no_tool.add(b.get("tool_use_id"))
                         if b.get("is_error") and re.search(r"requested permissions|haven't granted", text):
                             s["denials"] += 1
                         name, args, t0 = calls.get(b.get("tool_use_id"), ("", {}, t))
@@ -314,15 +327,20 @@ class Run:
                                 if line.strip().startswith("{") and '"serving"' in line:
                                     s["serve"] = json.loads(line.strip())
         # 担当エージェントのツール。記録に Read も Write もない担当は、Claude Code が残した担当の記録から読む
-        for kind, names, session, agent_id in agents.values():
+        for kind, uses, session, agent_id in agents.values():
             if kind is None:
                 continue
-            if not {"Read", "Write"} & set(names) and session and agent_id:
+            if not {"Read", "Write"} & {x for _, x in uses} and session and agent_id:
                 for log in Path.home().glob(f".claude/projects/*/{session}/subagents/agent-{agent_id}.jsonl"):
                     for _, e in read_events(log):
                         if e.get("type") == "assistant":
                             s["models"].add(e["message"].get("model"))
-                            names += [b.get("name") for b in tool_uses(e) if b.get("type") == "tool_use"]
+                        for b in tool_uses(e):
+                            if b.get("type") == "tool_use":
+                                uses.append((b.get("id"), b.get("name")))
+                            elif b.get("is_error") and "No such tool available" in result_text(b):
+                                no_tool.add(b.get("tool_use_id"))
+            names = [x for i, x in uses if i not in no_tool]
             if not {"Read", "Write"} & set(names):
                 s["agents_without_log"] += 1
             s["agent_tool_misuse"] += [f"{kind}:{x}" for x in names if x not in AGENT_TOOLS.get(kind, set())]
@@ -396,17 +414,24 @@ C2_PROMPT = """次の各項目は、ソースコードについて書いた設�
 - 事実を述べていない：ソースコードについての内容を持たない行（文書の説明、表の案内）。コードスパン（バッククォートで囲んだ所）のある行は、これにしない。
 
 「正しい」と「誤り」のときは、根拠のファイル（file）、行の範囲（start、end）、その範囲の行の引用（quote。ソースコードのとおりに写す）を書く。ほかの判定では、空の文字列と 0 にする。
+引用は、範囲の行をそのまま写す。途中を省く記号を書かない。長いときは、範囲を狭めて、確かめるのに要る行だけを引用する。
 あわせて、次の2つに true か false で答える。
 - names_unquoted：ソースコードの名前（関数、変数、型、マクロ）を、バッククォートで囲まずに書いているか。
 - missing_condition：条件付きコンパイル（#if、#ifdef など）の中の内容を、条件の名前を書かずに述べているか。
 """
 
 
-def plain(text):
-    """C-2 で渡す形にそろえる。表の行はセルを「、」でつなぎ、箇条書きの記号と先頭の要求の ID を除く。"""
+def cells(row):
+    return [c.strip() for c in re.split(r"(?<!\\)\|", row.strip().strip("|"))]
+
+
+def plain(text, header=None):
+    """C-2 で渡す形にそろえる。表の行は「列の見出し：セル」を「。」でつなぎ（要件の 5.4）、
+    箇条書きの記号と先頭の要求の ID を除く。"""
     s = text.strip()
     if s.startswith("|"):
-        s = "、".join(c.strip() for c in re.split(r"(?<!\\)\|", s.strip("|")) if c.strip())
+        pairs = zip(cells(header), cells(s)) if header else (("", c) for c in cells(s))
+        s = "。".join(f"{h}：{c}" if h else c for h, c in pairs if c and not REQ_ID.fullmatch(c))
     s = re.sub(r"^([-*+]|[0-9]+\.) ", "", s)
     return re.sub(r"^%s(:\s*|、)" % REQ_ID.pattern, "", s)
 
@@ -422,7 +447,7 @@ def c2_c3(run):
     false = run.truth["false_statements"] if run.truth and run.kind != "c14-src" else []
     tries, c3_ok, judged = 3 if false else 1, None, None
     for t in range(1, tries + 1):
-        mixed = [(plain(r["text"]), r) for r in real] + [(plain(f), None) for f in false]   # 区別を付けずに渡す
+        mixed = [(plain(r["text"], run.table_header(r)), r) for r in real] + [(plain(f), None) for f in false]   # 区別を付けずに渡す
         rng(f"C-2-order-{t}").shuffle(mixed)
         items = list(enumerate(mixed, 1))
         answers = run.judge(f"c2-try{t}", C2_PROMPT + "\n" + item_list([(i, m[0]) for i, m in items]), C2_PROPS,
