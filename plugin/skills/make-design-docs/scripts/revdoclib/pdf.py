@@ -9,6 +9,8 @@ from . import files, values
 SIDES = ("top", "bottom", "left", "right")
 _CHECK_RUN = re.compile("[%s]+" % values.CHECK_CHARS)
 _NOT_CHECK = re.compile("[^%s]+" % values.CHECK_CHARS)
+_NUMBERED = re.compile(r"^\s*([0-9]+)(\s|$)")
+_LINE_NUMBER = re.compile(r"^\s*[0-9]+ ?")
 
 
 def check_strings(text):
@@ -50,6 +52,34 @@ def margin_key(text):
     return "".join(c for c in unicodedata.normalize("NFKC", text) if not (c.isspace() or "0" <= c <= "9"))
 
 
+def page_text(textpage):
+    return textpage.get_text_range().replace("\r\n", "\n")
+
+
+def line_numbers(text):
+    """行番号のあるページなら、番号つきの行の番号（文字列）のリストを返す。そうでなければ空のリスト（2.6）。"""
+    lines = [x for x in text.split("\n") if x.strip()]  # 空でない行
+    nums = [m.group(1) for m in map(_NUMBERED.match, lines) if m]
+    numbered = (len(nums) >= values.LINE_NUMBER_MIN_LINES and len(nums) * 5 >= len(lines) * 4  # 8割以上
+                and all(int(b) == int(a) + 1 for a, b in zip(nums, nums[1:])))
+    return nums if numbered else []
+
+
+def _strip_text(text):
+    return "\n".join(_LINE_NUMBER.sub("", x) if _NUMBERED.match(x) else x for x in text.split("\n"))
+
+
+def _strip_units(units, nums):
+    """units は [{"text", ...}]。番号ごとに、前に選んだ単位より後ろの、番号で始まる最初の単位から番号を除く。"""
+    k = 0
+    for n in nums:
+        head = re.compile(r"^\s*%s(\s|$)" % n)
+        hit = next((i for i in range(k, len(units)) if head.match(units[i]["text"])), None)
+        if hit is not None:
+            units[hit]["text"] = re.sub(r"^\s*%s\s?" % n, "", units[hit]["text"])
+            k = hit + 1
+
+
 def unit_height(box):
     return (box[1] + box[3]) // 2
 
@@ -79,7 +109,7 @@ def find_margins(pages):
 
 
 def read_pdf(path):
-    """(ページの数, text_check, margins) を返す。開けないときと、0 ページのときは ValueError。"""
+    """(ページの数, text_check, margins, line_numbers) を返す。開けないときと、0 ページのときは ValueError。"""
     import pypdfium2 as pdfium
     import pypdfium2.raw as raw
 
@@ -91,7 +121,7 @@ def read_pdf(path):
         if len(doc) == 0:
             raise ValueError("0 ページ")
         total = unmapped = 0
-        pages = []
+        pages, numbered = [], 0
         for k in range(len(doc)):
             page = doc[k]
             textpage = page.get_textpage()
@@ -100,12 +130,13 @@ def read_pdf(path):
             unmapped += sum(1 for c in range(n) if raw.FPDFText_HasUnicodeMapError(textpage.raw, c) == 1)
             width, height = page.get_size()
             pages.append(text_units(textpage, width, height))
+            numbered += bool(line_numbers(page_text(textpage)))
             textpage.close()
             page.close()
     finally:
         doc.close()
     text_check = total > 0 and unmapped / total <= values.UNMAPPED_RATIO
-    return len(pages), text_check, find_margins(pages)
+    return len(pages), text_check, find_margins(pages), numbered * 2 >= len(pages)
 
 
 def is_margin(text, box, margins):
@@ -132,11 +163,14 @@ def prepare_pages(path, info, pages, folder):
             if not os.path.isfile(base + ".png"):
                 os.makedirs(folder, exist_ok=True)
                 page.render(scale=values.PAGE_DPI / 72).to_pil().save(base + ".png")
+            text = page_text(textpage)
+            nums = line_numbers(text) if info["line_numbers"] else []
             if not os.path.isfile(base + ".txt"):
-                files.write_text(base + ".txt", textpage.get_text_range().replace("\r\n", "\n"))
+                files.write_text(base + ".txt", _strip_text(text) if nums else text)
             if not os.path.isfile(base + ".json"):
                 units = [{"text": t, "box": b, "margin": is_margin(t, b, info["margins"])}
                          for t, b in text_units(textpage, width, height)]
+                _strip_units(units, nums)
                 check = info["text_check"] and any(check_strings(u["text"]) for u in units if not u["margin"])
                 files.write_text(base + ".json", files.dumps(
                     {"page": n, "size": [width, height], "check": check, "units": units}))

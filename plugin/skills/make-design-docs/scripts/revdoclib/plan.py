@@ -227,7 +227,7 @@ def make_pdfs(path):
     for k, rel in enumerate(rels, 1):
         full = os.path.join(root, *rel.split("/"))
         try:
-            pages, text_check, margins = pdfmod.read_pdf(full)
+            pages, text_check, margins, numbered = pdfmod.read_pdf(full)
         except ValueError as e:
             raise Fail("pdf_unreadable", "PDF を開けない：%s（%s）" % (rel, e))
         with open(full, "rb") as f:
@@ -236,7 +236,7 @@ def make_pdfs(path):
         stem = name[:-len(".pdf")]
         pdfs.append({"id": "D%02d" % k, "path": rel, "name": name,
                      "folder": _unique(_reserved(_clean(stem)), taken), "sha1": sha1, "pages": pages,
-                     "text_check": text_check, "margins": margins})
+                     "text_check": text_check, "line_numbers": numbered, "margins": margins})
     return pdfs
 
 

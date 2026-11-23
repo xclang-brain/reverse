@@ -27,6 +27,7 @@ POSITION_SCALE = 10000
 EDGE = 1000
 MARGIN_BAND = 100
 MARGIN_MIN_PAGES = 4
+LINE_NUMBER_MIN_LINES = 5
 
 # 1.3 path_too_long
 WINDOWS_MAX_PATH = 247
@@ -121,6 +122,8 @@ FIGURE_PAD = 0.04
 CHECK_CHARS = "0-9A-Za-z\u3041-\u3096\u30a1-\u30fa\u30fc\u3005\u3400-\u4dbf\u4e00-\u9fff"
 REASON_STRINGS = 10
 REASON_STRING_CHARS = 40
+# bare_name で、途中に大文字がある語を当てる最小の文字数
+CAMEL_MIN_CHARS = 5
 
 # 6.4 モジュールの執筆
 MODULE_HEADINGS = ("役割", "公開インターフェース", "データ構造", "処理の流れ", "状態", "依存関係", "エラー処理",

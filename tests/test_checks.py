@@ -188,8 +188,10 @@ CONVERT_CASES = [
     pytest.param([("タスクの状態を示す。", "タスク__状態を示す。")], "double_underscore", id="double_underscore"),
     pytest.param([("タスクの状態を示す。", "tnum_task の状態を示す。")], "bare_name", id="bare_name_underscore"),
     pytest.param([("タスクの状態を示す。", "TaskId の状態を示す。")], "bare_name", id="bare_name_camel"),
-    # 識別子の形でない語（大文字だけ、先頭だけ大文字、英字のない語）と、コードスパン、コードブロック、`](` を含む行は当たらない
-    pytest.param([("タスクの状態を示す。", "TASK と Task と 1_000 の状態を示す。")], None, id="not_bare_name"),
+    pytest.param([("タスクの状態を示す。", "aBcde の状態を示す。")], "bare_name", id="bare_name_camel_5_chars"),
+    # 識別子の形でない語（大文字だけ、先頭だけ大文字、英字のない語、途中に大文字がある 4 文字以下の語）と、
+    # コードスパン、コードブロック、`](` を含む行は当たらない
+    pytest.param([("タスクの状態を示す。", "TASK と Task と 1_000 と sP と kHz と aBcd の状態を示す。")], None, id="not_bare_name"),
     pytest.param([("タスクの状態を示す。", "`tnum_task` と `TaskId` の状態を示す。\n\n```c\nint tnum_task = TaskId;\n```")],
                  None, id="bare_name_in_code"),
     pytest.param([(FIG, "![TaskId の図 tnum_task](figure:0.1, 0.2, 0.9, 0.5)")], None, id="bare_name_in_link_line"),
@@ -212,10 +214,13 @@ def _convert_start(tmp_path, pdf_maker, **kw):
 
 @pytest.mark.parametrize("edits,rule", CONVERT_CASES)
 def test_convert_format_checks(tmp_path, edits, rule):
-    """A-8：変換の形式の検査（6.2）が、合格するページを通し、反するページを不合格にする（SR-27、SR-28、SR-31、SR-32）。"""
+    """A-8：変換の形式の検査（6.2）が、合格するページを通し、反するページを不合格にする。bare_name の理由の説明には、当たった語を書く（SR-27、SR-28、SR-31、SR-32）。"""
     out, job = _convert_start(tmp_path, helpers.make_image_pdf)
     _write(out, job["outputs"][0], _edit(PAGE, edits))
-    _next_and_assert(out, job["id"], rule)
+    job = _next_and_assert(out, job["id"], rule)
+    if rule == "bare_name":  # 当たる語は、置き換えた文の最初の語である
+        details = [x["detail"] for x in job["reasons"] if x["rule"] == "bare_name"]
+        assert any(edits[0][1].split()[0] in d for d in details), details
 
 
 def _mermaid(*lines, **kw):
@@ -365,7 +370,7 @@ def test_text_check_decision(tmp_path, maker, text_check, checks, rule):
 
 
 # ---------------------------------------------------------------------------
-# A-9：ページの画像と埋め込みテキスト、ヘッダーとフッター
+# A-9：ページの画像と埋め込みテキスト、ヘッダーとフッター、行の先頭の行番号
 # ---------------------------------------------------------------------------
 
 BODY = ["Body one", "Body two", "Body three"]
@@ -436,6 +441,67 @@ def test_header_footer(tmp_path, count, expected):
         for rel in job["outputs"]:  # 本文だけを書いたページは、欠けの検査に合格する
             _write(out, rel, "\n\n".join(BODY) + "\n")
         _next_and_assert(out, job["id"], None)
+
+
+LINES = ["Alpha task starts", "Bravo timer stops", "Charlie alarm rings", "Delta event waits", "Echo queue fills",
+         "Foxtrot lock opens", "Golf counter clears", "Hotel buffer drains", "India signal rises", "Juliet port closes"]
+
+
+def _numbered_page(numbers, plain=0, head=()):
+    """行の先頭に numbers の番号を付けた行と、番号のない plain 行を、上から順に置いたページ（行の中身は LINES の順）。
+
+    head は、ページの最初に置く項目のリストである。
+    """
+    texts = ["%d %s" % (n, LINES[k]) for k, n in enumerate(numbers)]
+    texts += LINES[len(texts):len(texts) + plain]
+    return list(head) + [(56, 120 + 20 * k, t) for k, t in enumerate(texts)]
+
+
+def _margin_list(out, job):
+    """変換の指示のファイルの、ヘッダーとフッターの文字列の一覧（margin_list。7.3）の行のリスト。"""
+    lines = helpers.read_text(Path(out) / ".work" / "jobs" / (job["id"] + ".md")).split("\n")
+    start = next(i for i, x in enumerate(lines) if x.startswith("- 次の文字列は、")) + 1
+    return [x for x in lines[start:lines.index("### 表と記号")] if x]
+
+
+def test_line_numbers(tmp_path):
+    """A-9：全部の行の先頭に行番号がある PDF では、計画の line_numbers が true になり、.txt と units から行番号が除かれ、指示に行番号の1行が入り、行番号を書かなかった出力が欠けの検査に合格する（SR-34。2.6、6.2、7.3）。"""
+    head = [(56, 40, "SPEC-DOC-0001")]
+    # テキストのファイルを印刷したように、番号はページをまたいで続く（1〜6、7〜12、…）
+    pages = [_numbered_page(range(6 * p + 1, 6 * p + 7), head=head) for p in range(4)]
+    out, job = _convert_start(tmp_path, helpers.make_text_pdf, pages=pages)
+    assert helpers.read_plan(out)["pdfs"][0]["line_numbers"] is True
+    folder = Path(out) / ".work" / "pdf" / "D01"
+    for p in range(1, 5):
+        assert helpers.read_text(folder / ("%04d.txt" % p)).splitlines() == ["SPEC-DOC-0001"] + LINES[:6], p
+        units = helpers.read_json(folder / ("%04d.json" % p))["units"]
+        assert [(u["text"], u["margin"]) for u in units] == (
+            [("SPEC-DOC-0001", True)] + [(t, False) for t in LINES[:6]]), p
+    # 行番号の1行は、ヘッダーの行の後ろの、最後の行である
+    assert _margin_list(out, job) == ["- 上端：SPEC-DOC-0001", "- 行の先頭：行番号（数字）"]
+    for rel in job["outputs"]:  # 本文だけを、行番号を書かずに書いたページは、欠けの検査に合格する
+        _write(out, rel, "\n\n".join(LINES[:6]) + "\n")
+    _next_and_assert(out, job["id"], None)
+
+
+@pytest.mark.parametrize("pages,expected", [
+    pytest.param([_numbered_page(range(1, 6))], True, id="five_lines"),
+    pytest.param([_numbered_page(range(1, 5))], False, id="four_lines"),
+    # 番号つきの行が、空でない行の 8 / 10 は8割以上で、7 / 9 は8割に足りない
+    pytest.param([_numbered_page(range(1, 9), plain=2)], True, id="eighty_percent"),
+    pytest.param([_numbered_page(range(1, 8), plain=2)], False, id="under_eighty_percent"),
+    pytest.param([_numbered_page([1, 2, 3, 5, 6])], False, id="not_increasing"),
+    # 行番号のあるページが、4 ページのうち 2 ページは半分以上で、3 ページのうち 1 ページは半分に足りない
+    pytest.param([_numbered_page(range(1, 7)), _numbered_page([], plain=6)] * 2, True, id="half_pages"),
+    pytest.param([_numbered_page(range(1, 7))] + [_numbered_page([], plain=6)] * 2, False, id="under_half_pages"),
+])
+def test_line_numbers_decision(tmp_path, pages, expected):
+    """A-9：番号つきの行が5行以上で、空でない行の8割以上を占め、番号が1ずつ増えるページを行番号のあるページとし、それが半分以上の PDF だけ line_numbers を true にする。true のときだけ、行番号を除き、指示の `- なし` の代わりに行番号の1行を書く（SR-34。2.6、7.3）。"""
+    out, job = _convert_start(tmp_path, helpers.make_text_pdf, pages=pages)
+    assert helpers.read_plan(out)["pdfs"][0]["line_numbers"] is expected
+    first = helpers.read_text(Path(out) / ".work" / "pdf" / "D01" / "0001.txt").splitlines()[0]
+    assert first == (LINES[0] if expected else "1 " + LINES[0]), first
+    assert _margin_list(out, job) == (["- 行の先頭：行番号（数字）"] if expected else ["- なし"])
 
 
 # ---------------------------------------------------------------------------

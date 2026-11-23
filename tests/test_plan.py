@@ -171,7 +171,7 @@ def test_plan_of_small_input(tmp_path):
     p = plan["pdfs"][0]
     assert {k: v for k, v in p.items() if k != "margins"} == {
         "id": "D01", "path": "spec.pdf", "name": "spec.pdf", "folder": "spec",
-        "sha1": _sha1(pdf.read_bytes()), "pages": 25, "text_check": True}
+        "sha1": _sha1(pdf.read_bytes()), "pages": 25, "text_check": True, "line_numbers": False}
     assert [{k: m[k] for k in ("key", "side", "text")} for m in p["margins"]] == [
         {"key": "SPEC-DOC-", "side": "top", "text": "SPEC-DOC-0001"},
         {"key": "", "side": "bottom", "text": "1"},

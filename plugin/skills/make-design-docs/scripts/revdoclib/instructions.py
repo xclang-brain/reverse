@@ -123,9 +123,11 @@ def _convert_values(ctx, job):
     sides = {}
     for m in pdf["margins"]:
         sides.setdefault(m["side"], []).append(m["text"] if m["key"] else "（数字）")
-    margins = "\n".join("- %s：%s" % (SIDE_NAMES[s], " ".join(t)) for s, t in sides.items()) or "- なし"
+    margins = ["- %s：%s" % (SIDE_NAMES[s], " ".join(t)) for s, t in sides.items()]
+    if pdf["line_numbers"]:
+        margins.append("- 行の先頭：行番号（数字）")
     return {"pdf_name": pdf["name"], "page_table": "\n".join(rows), "context_table": context,
-            "margin_list": margins}
+            "margin_list": "\n".join(margins) or "- なし"}
 
 
 def _fill(name, v):
