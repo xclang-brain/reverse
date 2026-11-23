@@ -9,6 +9,8 @@
 3. next を呼んで処理を進め、出力先のファイルと state.json を見る。
 """
 import hashlib
+import posixpath
+import re
 from pathlib import Path
 
 import pytest
@@ -196,6 +198,22 @@ def _nav(data, label):
     return next(item[label] for item in data["nav"] if label in item)
 
 
+def _link_targets(lines):
+    """docs/index.md の行のリンク先（5.7 のパス）を、# から後ろを除き、docs/ からの相対パスにして返す。"""
+    found = []
+    for line in lines:
+        for m in re.finditer(r"\]\(([^)\s]+)", line):
+            path = m.group(1).split("#", 1)[0]
+            if path and not re.match(r"(https?|mailto):", path):
+                found.append(posixpath.normpath(path))
+    return found
+
+
+def _links_under(targets, folder):
+    """リンク先のどれかが、docs/ の folder の中（folder そのものを含む）にあるか。"""
+    return any(t == folder or t.startswith(folder + "/") for t in targets)
+
+
 # ---------------------------------------------------------------------------
 # 8.1 既存の設計書の組み立て
 # ---------------------------------------------------------------------------
@@ -258,8 +276,14 @@ FIGURES = [("p0001-1.png", 1, (0.06, 0.16, 0.54, 0.64)),
            ("p0002-1.png", 2, (0.16, 0.16, 0.84, 0.44))]
 
 
+def _dark_box(img):
+    """グレーの画像の、黒い部分（128 未満）を囲む外枠（左、上、右、下）。黒い部分がなければ None。"""
+    return img.point(lambda v: 255 if v < 128 else 0).getbbox()
+
+
 def test_assemble_pages_headings_figures(tmp_path):
     """A-8、A-9：組み立てで、ページの目印が入り、番号の見出しのレベルがそろい、図が決まった範囲と大きさで切り出される（SR-39、SR-40）。"""
+    import pypdfium2 as pdfium
     from PIL import Image
 
     pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
@@ -274,12 +298,25 @@ def test_assemble_pages_headings_figures(tmp_path):
     legacy = Path(out) / "docs" / "legacy" / "spec"
     assert _file_lines(legacy / "001.md") == ASSEMBLED
     assert sorted(p.name for p in (legacy / "fig").iterdir()) == [f[0] for f in FIGURES]
-    for name, page, (x0, y0, x1, y1) in FIGURES:
-        w, h = helpers.read_json(Path(out) / ".work" / "pdf" / "D01" / ("%04d.json" % page))["size"]
-        with Image.open(str(legacy / "fig" / name)) as img:
-            size = img.size
-        assert abs(size[0] - (x1 - x0) * w * 200 / 72) <= 2 and abs(size[1] - (y1 - y0) * h * 200 / 72) <= 2, \
-            (name, size)
+    doc = pdfium.PdfDocument(str(pdf))
+    try:
+        for name, page, (x0, y0, x1, y1) in FIGURES:
+            w, h = helpers.read_json(Path(out) / ".work" / "pdf" / "D01" / ("%04d.json" % page))["size"]
+            with Image.open(str(legacy / "fig" / name)) as img:
+                got = img.convert("L")
+            assert abs(got.size[0] - (x1 - x0) * w * 200 / 72) <= 2 and abs(got.size[1] - (y1 - y0) * h * 200 / 72) <= 2, \
+                (name, got.size)
+            # 範囲：テストの中でページを 200 dpi で描いて同じ範囲を切り出し、黒い部分の外枠の位置を比べる
+            whole = doc[page - 1].render(scale=200 / 72).to_pil().convert("L")
+            ref = whole.crop((round(x0 * whole.size[0]), round(y0 * whole.size[1]),
+                              round(x1 * whole.size[0]), round(y1 * whole.size[1])))
+            ref_box = _dark_box(ref)
+            if ref_box is not None:  # 何も描いていない範囲は、位置を比べられない
+                got_box = _dark_box(got.resize(ref.size))
+                assert got_box is not None and max(abs(a - b) for a, b in zip(got_box, ref_box)) <= 6, \
+                    (name, got_box, ref_box)
+    finally:
+        doc.close()
     unknowns = _file_lines(Path(out) / "docs" / "review" / "unknowns.md")
     assert _items(unknowns, "### 判読できない文字のあるページ") == ["- spec.pdf p.2"]
 
@@ -321,6 +358,32 @@ def test_assemble_split(tmp_path):
     assert _nav(_load_mkdocs(out), "既存の設計書") == [{"spec.pdf": [
         {"A 章 (p.1-2)": "legacy/spec/001.md"}, {"C 章 (p.3-4)": "legacy/spec/002.md"},
         {"D 節 (p.4)": "legacy/spec/003.md"}, {"(p.4)": "legacy/spec/004.md"}]}]
+
+
+# ---------------------------------------------------------------------------
+# 8.2 照合の仕事を作る
+# ---------------------------------------------------------------------------
+
+def test_match_split(tmp_path):
+    """A-8：照合の仕事は、docs/legacy/ の本文の行を、見出しの切れ目で 100 行までに分けたものになる（SR-41。5.6、8.2）。"""
+    pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
+    out = _start(tmp_path, "convert", pdf=pdf)
+    job = helpers.jobs_with(out, status="issued", kind="convert")[0]
+    pages = [["## A", ""] + _body("A", 60) + ["", "## B", ""] + _body("B", 50) + ["", "## C", ""] + _body("C", 230),
+             ["## D", ""] + _body("D", 30)]
+    for rel, lines in zip(job["outputs"], pages):
+        _write(out, rel, "\n".join(lines) + "\n")
+    assert helpers.revdoc("next", out).ok and helpers.read_state(out)["stage"] == "match"
+
+    legacy = _file_lines(Path(out) / "docs" / "legacy" / "spec" / "001.md")
+    jobs = helpers.jobs_with(out, kind="match")
+    infos = [helpers.read_json(Path(out) / ".work" / "match" / (j["id"] + ".json")) for j in jobs]
+    # 5.6 の例と同じ：60、50、230、30 行の節は、60、50、100、100、30 + 30 行の5つの仕事になる
+    assert [i["count"] for i in infos] == [60, 50, 100, 100, 60]
+    assert all(i["file"] == "docs/legacy/spec/001.md" for i in infos)
+    assert [legacy[i["lines"][0]["line"] - 1] for i in infos] == [
+        "A の本文 1 である。", "B の本文 1 である。", "C の本文 1 である。", "C の本文 101 である。", "C の本文 201 である。"]
+    assert [j["target"] for j in jobs] == ["legacy/spec/001.md:%d" % i["lines"][0]["line"] for i in infos]
 
 
 # ---------------------------------------------------------------------------
@@ -532,21 +595,29 @@ def test_rewritten_line_is_verified_again(tmp_path):
 
 
 def test_unjudged_lines_removed_after_round_3(tmp_path):
-    """A-8：3回の検証で判定が付かなかった行は、設計書から消え、決まった1文が入り、不明点の一覧に載る（SR-63、SR-64、SR-66）。"""
+    """A-8：3回の検証で判定が付かなかった行は、2回目からの指示に使えなかった番号が書かれ、設計書から消え、決まった1文が入り、不明点の一覧に載る（SR-63、SR-64、SR-66。7.2）。"""
     out = _module_start(tmp_path, _design({"役割": [D_ROLE], "公開インターフェース": [D_IFACE]}))
     files = {}
+    texts = {}
 
-    def bad(j):  # kernel の内部設計書の検証の仕事にだけ、形の悪い判定を書く
+    def bad(j):  # kernel の内部設計書の検証の仕事にだけ、形の悪い判定を書く。渡したときの指示のファイルを残しておく。
         if j["kind"] != "verify":
             return False
         if j["id"] not in files:
             files[j["id"]] = helpers.read_json(Path(out) / ".work" / "verify" / (j["id"] + ".json"))["file"]
+            texts[j["id"]] = helpers.read_text(Path(out) / ".work" / "jobs" / (j["id"] + ".md"))
         return files[j["id"]] == KERNEL
 
     _drive(out, until="write_overall", bad=bad)
     jobs = _verify_jobs(out, KERNEL)
     assert [[e["text"] for e in info["lines"]] for _, info in jobs] == [[D_ROLE, D_IFACE]] * 3
     assert all(j["status"] == "done" and j["tries"] == 0 for j, _ in jobs), jobs
+    assert "## 前回の不合格の理由" not in texts[jobs[0][0]["id"]]
+    for j, _ in jobs[1:]:  # 2回目と3回目：前の回の理由を、今回の番号で書く
+        section = texts[j["id"]].split("## 前回の不合格の理由", 1)[1]
+        assert "前回の判定のうち、次の番号は使えなかった。" in section
+        for n in (1, 2):
+            assert re.search(r"^- \[[a-z_]+\] \[%d\]：" % n, section, re.M), section
     expected = ["# kernel"]
     for h in helpers.MODULE_HEADINGS:
         expected += ["## " + h, NONE_SOURCE]
@@ -562,17 +633,15 @@ def test_unjudged_lines_removed_after_round_3(tmp_path):
 
 
 def test_many_verify_jobs_in_one_file(tmp_path):
-    """A-8：1つのファイルの検証の仕事が5件以上のとき、全部の対象の行に番号が振られ、2回に分けて渡した仕事の判定が全部使われる（SR-59、SR-63）。"""
+    """A-8：1つのファイルの検証の仕事が5件以上で、2回に分けて渡したとき、全部の仕事の判定が設計書に使われる（SR-63）。"""
     sections = {h: ["- `ActivateTask` の項目 %d-%d。" % (i, k) for k in range(1, 51)]
                 for i, h in enumerate(helpers.MODULE_HEADINGS[:5])}
     last = set(sections[helpers.MODULE_HEADINGS[4]])
     design = _design(sections)
-    targets = [n for n, line in enumerate(design.split("\n"), 1) if line.startswith("- `ActivateTask` の項目")]
     out = _module_start(tmp_path, design)
     _drive(out, until="write_overall",
            verdict=lambda e: "不明" if e["file"] == KERNEL and e["text"] in last else None)
-    jobs = _verify_jobs(out, KERNEL)
-    assert len(jobs) >= 5 and sorted(e["line"] for _, info in jobs for e in info["lines"]) == targets
+    assert len(_verify_jobs(out, KERNEL)) >= 5
     expected = ["# kernel"]
     for i, h in enumerate(helpers.MODULE_HEADINGS):
         expected += ["## " + h] + (sections[h] if i < 4 else [NONE_SOURCE])
@@ -621,7 +690,7 @@ def test_digest_and_failed_module(tmp_path):
     index = _file_lines(docs / "index.md")
     after = index[index.index("## 件数") + 1:]
     assert "| 失敗した仕事（執筆（モジュール）） | 1 |" in after
-    assert any("](review/unknowns.md)" in x for x in after if not x.startswith("|")), after
+    assert "review/unknowns.md" in _link_targets([x for x in after if not x.startswith("|")]), after
 
 
 # ---------------------------------------------------------------------------
@@ -635,27 +704,26 @@ MARK_LINES = ["- 【既存設計書のみ】：既存の設計書から取った
 
 
 def _unknown_count(lines):
-    """不明点の一覧の「## 不明点」の下の項目の数（`- なし` は数えない）。"""
-    part = lines[lines.index("## 不明点") + 1:lines.index("## 処理の失敗")]
-    return len([x for x in part if x.startswith("- ") and x != "- なし"])
+    """不明点の一覧（続きのファイルの行をつないだものでもよい）の「## 不明点」の下の項目の数（`- なし` は数えない）。"""
+    count, section = 0, None
+    for x in lines:
+        if x.startswith("## "):
+            section = x
+        elif section == "## 不明点" and x.startswith("- ") and x != "- なし":
+            count += 1
+    return count
 
 
 @pytest.mark.parametrize("mode", ["both", "source", "pdf"])
 def test_finish_by_mode(tmp_path, mode):
-    """A-8：仕上げで、mode ごとの docs/ の形、入口のページ、不明点の一覧、mkdocs.yml が決まりどおりにでき、check に合格する（SR-66、SR-67、SR-68、SR-69、SR-72）。"""
+    """A-8：仕上げで、入口のページ、不明点の一覧、mkdocs.yml が mode ごとに決まりどおりにでき、check に合格する（SR-66、SR-67、SR-68、SR-69、SR-72）。"""
     src = helpers.make_source_tree(tmp_path / "src", dict(LAYOUT, **EXCLUDED)) if mode != "pdf" else None
     pdf = helpers.make_text_pdf(tmp_path / "pdf" / "spec.pdf", pages=3) if mode != "source" else None
     out = tmp_path / "out"
     r = helpers.run_to_done(out, src=src, pdf=pdf)
     assert r.ok and r.data["state"] == "done", r.data
     docs = Path(out) / "docs"
-
-    # mode ごとの docs/ の形（8.7 の表）
-    assert (docs / "index.md").is_file() and (docs / "review" / "unknowns.md").is_file()
-    assert (Path(out) / "mkdocs.yml").is_file()
-    assert (docs / "requirements").is_dir() == (mode != "pdf") and (docs / "design").is_dir() == (mode != "pdf")
-    assert (docs / "legacy" / "spec").is_dir() == (mode != "source")
-    assert (docs / "review" / "discrepancies.md").exists() == (mode == "both")
+    # mode ごとの docs/ の形（8.7 の表）は、test_flow.py の test_full_run が確かめる
     c = _check(out)
     assert c["passed"] is True and c["problem_count"] == 0 and c["failed_jobs"] == 0, c
 
@@ -683,11 +751,12 @@ def test_finish_by_mode(tmp_path, mode):
     assert got == headings
     links = _items(index, "## 設計書の構成")
     assert links and all("](" in x for x in links), links
-    assert any("](requirements/" in x for x in links) == (mode != "pdf")
-    assert any("](design/" in x for x in links) == (mode != "pdf")
-    assert any("](legacy/" in x for x in links) == (mode != "source")
-    assert any("](review/discrepancies.md" in x for x in links) == (mode == "both")
-    assert any("](review/unknowns.md" in x for x in links)
+    targets = _link_targets(links)  # リンク先の書き方は決まっていないので、行き先で比べる
+    assert _links_under(targets, "requirements") == (mode != "pdf"), targets
+    assert _links_under(targets, "design") == (mode != "pdf"), targets
+    assert _links_under(targets, "legacy") == (mode != "source"), targets
+    assert ("review/discrepancies.md" in targets) == (mode == "both"), targets
+    assert "review/unknowns.md" in targets, targets
     inputs = []
     if mode != "pdf":
         inputs += ["- ソースコード：src（2 ファイル、320 行）",
@@ -759,26 +828,77 @@ def test_mkdocs_nav_and_split_module(tmp_path):
     ]
 
 
+def test_review_lists_split(tmp_path):
+    """A-8：食い違いの一覧と不明点の一覧が 1,000 行を超えると、続きのファイルに分かれ、件数は通して数えられ、nav に続きが載る（SR-46、SR-66、SR-68。8.7、10章）。"""
+    pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=1)
+    out = _start(tmp_path, "convert", pdf=pdf)
+    job = helpers.jobs_with(out, status="issued", kind="convert")[0]
+    _write(out, job["outputs"][0], "\n".join(_body("A", 150)) + "\n")
+    assert helpers.revdoc("next", out).ok and helpers.read_state(out)["stage"] == "match"
+    for j in helpers.jobs_with(out, status="issued", kind="match"):  # 全部の行を「食い違い」にする（150 件）
+        count = helpers.read_json(Path(out) / ".work" / "match" / (j["id"] + ".json"))["count"]
+        _write(out, j["outputs"][0], "".join(DISCREPANCY.replace("## 1 ", "## %d " % n, 1) for n in range(1, count + 1)))
+    assert helpers.revdoc("next", out).ok and helpers.read_state(out)["stage"] == "write_module"
+    helpers.fake_agent(out)
+    written = ["- `ActivateTask` の不明点 %d。" % k for k in range(1, 1101)]
+    _write(out, next(rel for rel in _part_job(out, "kernel")["outputs"] if rel.startswith(".work/unknowns/")),
+           "\n".join(written) + "\n")
+    r = _drive(out)
+    assert r.data["state"] == "done", r.data
+
+    review = Path(out) / "docs" / "review"
+    disc = [_file_lines(review / "discrepancies.md"), _file_lines(review / "discrepancies~p2.md")]
+    unk = [_file_lines(review / "unknowns.md"), _file_lines(review / "unknowns~p2.md")]
+    assert not (review / "discrepancies~p3.md").exists() and not (review / "unknowns~p3.md").exists()
+    assert all(len(lines) <= 1000 for lines in disc + unk)
+    # 食い違いの一覧：続きは「## <番号>.」の見出しから始まる
+    assert disc[1][0] == "# 食い違いの一覧（続き 2）"
+    assert re.match(r"## [0-9]+\. ", _nonempty(disc[1][1:])[0]), disc[1][:5]
+    assert len([x for x in disc[0] + disc[1] if re.match(r"## [0-9]+\. ", x)]) == 150
+    # 不明点の一覧：続きは、切った所の ## と ### の見出しをもう一度書く
+    assert unk[1][0] == "# 不明点の一覧（続き 2）"
+    assert _nonempty(unk[1][1:])[:2] == ["## 不明点", "### 執筆担当が書いた不明点"]
+    assert [x for x in unk[0] + unk[1] if x.startswith("- kernel：")] == ["- kernel：" + x[2:] for x in written]
+    # 件数は、続きのファイルも通して数える
+    index = _file_lines(Path(out) / "docs" / "index.md")
+    assert "| 食い違い | 150 |" in index
+    assert "| 不明点 | %d |" % _unknown_count(unk[0] + unk[1]) in index
+    assert _nav(_load_mkdocs(out), "確認の一覧") == [
+        {"食い違いの一覧": "review/discrepancies.md"}, {"食い違いの一覧（続き 2）": "review/discrepancies~p2.md"},
+        {"不明点の一覧": "review/unknowns.md"}, {"不明点の一覧（続き 2）": "review/unknowns~p2.md"}]
+    assert _check(out)["passed"] is True
+
+
 # ---------------------------------------------------------------------------
 # 9章 check
 # ---------------------------------------------------------------------------
 
 def test_check_finds_problems(tmp_path):
-    """A-8：done の後に決まりに反するように docs/ を書き換えると、check が、ファイルと検査の名前を付けて不合格を返す（SR-69）。"""
+    """A-8：done の後に決まりに反するように docs/ を書き換えると、check が、ファイルと検査の名前を付けて不合格を返す。推測の6つの言い回しは、どれも不合格になり、docs/legacy/ の語とモジュールの名前の語は、名前の検査に合格する（SR-58、SR-65、SR-69）。"""
     pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
-    src = helpers.make_source_tree(tmp_path / "src", LAYOUT)
+    src = helpers.make_source_tree(tmp_path / "src", dict(LAYOUT, **{"main.c": 10}))  # main.c はモジュール _root になる
     out = tmp_path / "out"
     r = helpers.run_to_done(out, src=src, pdf=pdf)
     assert r.ok and r.data["state"] == "done", r.data
     assert _check(out)["passed"] is True
     docs = Path(out) / "docs"
+    # s1 は docs/legacy/ の Mermaid にだけある語、_root はモジュールの名前の語である（5.8）
+    names = _file_lines(Path(out) / ".work" / "names.txt")
+    assert "s1" not in names and "_root" not in names
+    assert "s1" in re.findall(r"[A-Za-z0-9_]+", helpers.read_text(docs / "legacy" / "spec" / "001.md"))
 
     def edit(rel, old, new):
         text = helpers.read_text(docs / rel)
         assert old in text, (rel, old)
         _write(out, "docs/" + rel, text.replace(old, new, 1))
 
-    edit("design/modules/kernel.md", "## 役割\n", "## 役割\n\n- `ActivateTask` は、おそらく呼ばれる。\n")
+    guesses = ["- `ActivateTask` は、呼ばれると思われる。", "- `ActivateTask` は、呼ばれると考えられる。",
+               "- `ActivateTask` は、おそらく呼ばれる。", "- `ActivateTask` は、呼ばれるかもしれない。",
+               "- `ActivateTask` は、呼ばれるはずである。", "- `ActivateTask` は、呼ばれると推測する。"]
+    edit("design/modules/kernel.md", "## 役割\n",
+         "## 役割\n\n" + "\n".join(guesses) + "\n\n### `s1`\n\n### `_root`\n")
+    kernel = _file_lines(docs / "design" / "modules" / "kernel.md")
+    guess_lines = [kernel.index(x) + 1 for x in guesses]
     edit("legacy/spec/001.md", "<!-- page: 1 -->\n", "<!-- page: 1 -->\n\n本文に __ がある。\n")
     edit("requirements/3-1-functions/kernel.md", "## 機能の要求\n",
          "## 機能の要求\n\n- FR-KERNEL-901: `ActivateTask` を呼ぶ。\n- FR-KERNEL-901: `ActivateTask` を呼ぶ。\n")
@@ -797,3 +917,5 @@ def test_check_finds_problems(tmp_path):
         ("docs/index.md", "broken_link"),
         ("docs/review/discrepancies.md", "missing_file"),
     }, c["problems"]
+    assert sorted(p["line"] for p in c["problems"]
+                  if p["file"] == "docs/design/modules/kernel.md" and p["rule"] == "speculation") == guess_lines

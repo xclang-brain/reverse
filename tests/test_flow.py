@@ -171,13 +171,13 @@ def test_full_run(tmp_path, mode):
 # ---------------------------------------------------------------------------
 
 def test_next_output(tmp_path_factory):
-    """A-4：短いパスの入力で、next の出力が毎回 1,000 バイト以下で、jobs が4件以下の決まった項目を持ち、段階の順、ID の順に渡される（SR-04、SR-05、SR-06）。"""
+    """A-4：短いパスの入力で、next の出力が毎回 1,000 バイト以下で、jobs が4件以下の決まった項目を持ち、段階の順に、段階の中では ID の順に渡される（SR-04、SR-05、SR-06）。"""
     base = tmp_path_factory.mktemp("a4")
     src = helpers.make_source_tree(base / "src")
     pdf = helpers.make_text_pdf(base / "pdf" / "spec.pdf", pages=3)
     out = _short_out(tmp_path_factory)
     assert helpers.revdoc("init", out, src=src, pdf=pdf).ok
-    stages, ids = [], []
+    stages, by_stage = [], {}
     for _ in range(3000):
         r = helpers.revdoc("next", out)
         assert r.ok, r.data
@@ -194,10 +194,13 @@ def test_next_output(tmp_path_factory):
         assert r.data["do"] == JOBS_DO + _cmd("next", out)
         if not stages or stages[-1] != state["stage"]:
             stages.append(state["stage"])
-        ids += [j["id"] for j in issued]
+        by_stage.setdefault(state["stage"], []).extend(j["id"] for j in issued)
         helpers.fake_agent(out)
     assert stages == STAGES
-    assert ids == sorted(set(ids))
+    # 照合と検証の仕事は、後から続きの番号で作る（2.7）。ID の順は、段階の中で確かめる。
+    assert all(ids == sorted(set(ids)) for ids in by_stage.values()), by_stage
+    every = [i for ids in by_stage.values() for i in ids]
+    assert len(every) == len(set(every))
     done = {"ok": True, "state": "done", "jobs": [], "do": "All jobs are finished. Run: " + _cmd("serve", out)}
     assert r.data == done
     assert helpers.revdoc("next", out).data == done
@@ -227,12 +230,13 @@ def _drive_instructions(out, src, pdf):
                 continue
             rounds += 1
             assert (out / ".work" / "jobs" / (many_job + ".files.md")).is_file()  # 表が 20KB を超えるので、別のファイルになる
-            if rounds == 2:  # 不合格の理由が 50 個を超える渡し直し
+            if rounds == 2:  # 不合格の理由が 50 個を超える渡し直し。書く数は、最大 50 個（7.2）。
                 total = len(job["reasons"])
                 assert total > 50
                 section = text.split("## 前回の不合格の理由", 1)[1]
-                assert len(re.findall(r"^- \[[a-z_]+\] ", section, re.M)) == 50
-                assert "- ほか %d 件" % (total - 50) in section
+                written = len(re.findall(r"^- \[[a-z_]+\] ", section, re.M))
+                assert 1 <= written <= 50
+                assert "- ほか %d 件" % (total - written) in section.splitlines()
         snaps.append({p.name: helpers.read_text(p) for p in sorted((out / ".work" / "jobs").iterdir())})
         if rounds == 1 and any(j["id"] == many_job for j in issued):
             with open(_abs(out, ".work/memo/%s.md" % many["id"]), "w", encoding="utf-8", newline="\n") as f:
@@ -304,6 +308,17 @@ def test_rejected_output_is_retried_then_failed(tmp_path):
     index = _lines(out, "docs/index.md")
     assert "| 失敗した仕事（解析） | 1 |" in index
     assert "| 失敗した仕事（執筆（モジュール）） | 1 |" in index
+
+
+def test_failed_convert_pages_not_counted(tmp_path):
+    """A-6：3回とも不合格で失敗になった変換のページは docs/legacy/ に残り、check で不合格に数えない（SR-11、SR-69。9章）。"""
+    pdf = helpers.make_text_pdf(tmp_path / "pdf" / "spec.pdf", pages=3)
+    out = tmp_path / "out"
+    r = helpers.run_to_done(out, pdf=pdf, bad=("J00001",))  # 代わりの関数は、double_underscore に反するページを書く
+    assert r.ok and r.data["state"] == "done", r.data
+    assert _job(out, "J00001")["status"] == "failed"
+    assert "__" in helpers.read_text(out / "docs" / "legacy" / "spec" / "001.md")
+    _check_passed(out, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +484,10 @@ def uninterrupted(tmp_path_factory):
     src = helpers.make_source_tree(base / "src")
     pdf = helpers.make_text_pdf(base / "pdf" / "spec.pdf", pages=3)
     out = base / "out"
-    r = helpers.run_to_done(out, src=src, pdf=pdf, verdict=_verdict)
+    # module の fixture は、autouse の文字コードの見張りより先に動くので、ここで見張る
+    with helpers.EncodingGuard() as guard:
+        r = helpers.run_to_done(out, src=src, pdf=pdf, verdict=_verdict)
+    assert not guard.found, "文字コードを指定しないファイルの読み書きがある：%s" % guard.found
     assert r.ok and r.data["state"] == "done", r.data
     # 2つの場面（記録を入れる回、不明の判定がある回）が起きていることを確かめておく
     assert "## 既存の設計書にだけ書かれている内容" in _lines(out, "docs/design/modules/_root.md")

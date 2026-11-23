@@ -309,18 +309,20 @@ def test_missing_packages(tmp_path, monkeypatch, revdoclib):
     empty = tmp_path / "empty"
     empty.mkdir()  # PDF がないフォルダ。no_pdf_files より missing_packages が先
     for pdf, names in ((empty, ["mkdocs-material", "pypdfium2>=5", "Pillow"]), (None, ["mkdocs-material"])):
+        before = len(calls)
         r = helpers.revdoc("init", tmp_path / "out", src=src, pdf=pdf)
+        # 呼ぶ回数は決まっていない。呼んだことと、need_pdf が --pdf の有無に合うことを確かめる。
+        assert calls[before:] and all(bool(c) == (pdf is not None) for c in calls[before:]), calls
         assert r.code == 1 and r.data["error"] == "missing_packages"
         assert r.data["packages"] == names
         assert r.data["do"] == (
             "Tell the user in Japanese that these Python packages are missing and that they should run this"
             " themselves: %s -m pip install %s. Then stop. Running the same skill command again starts the work."
             % (_python(), " ".join('"%s"' % n for n in names)))
-    assert calls == [True, False]
 
 
 def test_init_resume(tmp_path):
-    """A-1：再開の init が、渡したままの仕事を pending に戻し、回数を変えず、no_output を 0 にする。入力の場所が変わると input_changed になる（SR-13、SR-14）。"""
+    """A-1：再開の init が、渡したままの仕事を pending に戻し、回数を変えず、no_output を 0 にする。入力の場所か、ソースコードと PDF の組み合わせが変わると input_changed になる（SR-13、SR-14）。"""
     src = helpers.make_source_tree(tmp_path / "src")
     out = tmp_path / "out"
     _init(out, src=src)
@@ -345,6 +347,11 @@ def test_init_resume(tmp_path):
     r = helpers.revdoc("init", out, src=moved)
     assert r.code == 1 and r.data["error"] == "input_changed"
     assert r.data["do"] == INPUT_CHANGED_DO
+
+    # 同じソースコードに PDF を足すと、mode が変わる（3章の 4）
+    pdf = helpers.make_text_pdf(tmp_path / "pdf" / "spec.pdf", pages=1)
+    r = helpers.revdoc("init", out, src=src, pdf=pdf)
+    assert r.code == 1 and r.data["error"] == "input_changed" and r.data["do"] == INPUT_CHANGED_DO
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +438,7 @@ def test_module_and_pdf_names(tmp_path):
 
 
 def test_encodings_and_unread_files(tmp_path):
-    """A-10：Shift_JIS と EUC-JP のファイルから UTF-8 のコピーができ、2MB を超えるテキストと文字コードが分からないファイルが不明点の一覧に載り、2MB を超えるバイナリーは載らない（SR-16、SR-17、SR-66）。"""
+    """A-10：Shift_JIS と EUC-JP のファイルから UTF-8 のコピーができて指示のファイルがコピーを指し、2MB を超えるテキストと文字コードが分からないファイルが不明点の一覧に載り、2MB を超えるバイナリーは載らない（SR-16、SR-17、SR-66）。"""
     sjis_text = "/* 日本語のコメント */\r\nint sjis_func(int x)\r\n{\r\n    return x;\r\n}\r\n"
     euc_text = "/* 日本語のコメント */\nint euc_func(int x)\n{\n    return x;\n}\n"
     odd = b"int odd_value = 1; /* \x81\x20 */\n"  # UTF-8、EUC-JP、CP932 のどれでも読めない
@@ -444,6 +451,16 @@ def test_encodings_and_unread_files(tmp_path):
         "big/blob.c": b"\x00" + b"a" * 2100000,       # 2MB を超えるバイナリー
     })
     out = tmp_path / "out"
+
+    # 解析の指示のファイルの「ソースファイルの表」は、コピーがあるファイルではコピーの絶対パスを指す（2.2、7.3）
+    plan = _init(out, src=src)
+    assert helpers.revdoc("next", out).ok
+    unit = next(u for u in plan["units"] if u["module"] == "jp")
+    job = next(j for j in plan["jobs"] if j["kind"] == "analyze" and j["target"] == unit["id"])
+    text = helpers.read_text(out / ".work" / "jobs" / (job["id"] + ".md"))
+    for f in unit["files"]:
+        copy = os.path.join(os.path.abspath(str(out)), ".work", "src-utf8", *f["path"].split("/"))
+        assert "| %s | %d-%d | %s |" % (copy, f["start"], f["end"], f["path"]) in text.splitlines(), f
 
     r = helpers.run_to_done(out, src=src)
     assert r.ok and r.data["state"] == "done", r.data

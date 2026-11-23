@@ -9,6 +9,8 @@
    合格なら done になる。不合格なら、回数が1増え、reasons に検査の名前が入る（4.5）。
 """
 import hashlib
+import os
+import re
 from pathlib import Path
 
 import pytest
@@ -121,11 +123,26 @@ ANALYZE_CASES = [
 
 @pytest.mark.parametrize("edits,rule", ANALYZE_CASES)
 def test_analyze_checks(tmp_path, edits, rule):
-    """A-8：解析メモの検査（6.1、5.3）が、合格する出力を通し、反する出力を不合格にする（SR-20、SR-21、SR-23）。"""
+    """A-8：解析メモの検査（6.1、5.3）が、合格する出力を通し、反する出力を不合格にする（SR-20、SR-21、SR-23、SR-52）。"""
     out = _start(tmp_path, "analyze")
     job = next(j for j in _issued(out, "analyze") if j["target"] == "U0001")
     _write(out, job["outputs"][0], _edit(MEMO, edits))
     _next_and_assert(out, job["id"], rule)
+
+
+def test_too_long_memo_is_used_on_third_try(tmp_path):
+    """A-6：行数だけが上限を超えた解析メモは、3回目にそのまま使われ、失敗にならない（SR-11。4.5 の例外）。"""
+    out = _start(tmp_path, "analyze")
+    job = next(j for j in _issued(out, "analyze") if j["target"] == "U0001")
+    memo = _edit(MEMO, [(ROLE, "\n".join([ROLE] * 200))])  # 200 行を超えるが、ほかの検査には合格する
+    for tries in (1, 2, 3):
+        _write(out, job["outputs"][0], memo)
+        assert helpers.revdoc("next", out).ok
+        now = _job(out, job["id"])
+        if tries < 3:
+            assert now["status"] == "issued" and {x["rule"] for x in now["reasons"]} == {"too_long"}, now
+    assert now["status"] == "done", now
+    assert helpers.read_text(Path(out) / job["outputs"][0]) == memo
 
 
 # ---------------------------------------------------------------------------
@@ -266,17 +283,68 @@ def test_convert_string_checks(tmp_path, pages, rule):
     _next_and_assert(out, job["id"], rule)
 
 
-@pytest.mark.parametrize("maker,text_check,rule", [
-    pytest.param(helpers.make_text_pdf, True, "text_extra", id="text"),
-    pytest.param(helpers.make_image_pdf, False, None, id="image_only"),
-    pytest.param(helpers.make_unmapped_pdf, False, None, id="unmapped"),
+def test_convert_retry(tmp_path):
+    """A-8：変換は不合格のページだけを渡し直し、余分の指摘に画像で確かめる文を書き、同じ指摘だけが残ったページは合格して一覧に載り、3回目には Mermaid に不合格だった図を画像にする指示を書く（SR-35、SR-36、SR-38）。"""
+    out, job = _convert_start(tmp_path, helpers.make_text_pdf, pages=[[(56, 120, TEXTS[n])] for n in (1, 2, 3)])
+    jid = job["id"]
+    p1, p2, p3 = job["outputs"]
+    extra = TEXTS[1] + " Zulu\n"                                            # p.1：余分「Zulu」
+    bad_fig = TEXTS[2] + "\n\n" + _mermaid("flowchart LR", "    a -->|yes| b")  # p.2：F3 に当たる図
+    instruction = Path(out) / ".work" / "jobs" / (jid + ".md")
+
+    # 1回目：p.1 と p.2 だけが不合格になり、渡し直される
+    _write(out, p1, extra)
+    _write(out, p2, bad_fig)
+    _write(out, p3, TEXTS[3] + "\n")
+    job = _next_and_assert(out, jid, "text_extra")
+    assert "bad_mermaid" in {x["rule"] for x in job["reasons"]} and job["outputs"] == [p1, p2], job
+    text = helpers.read_text(instruction)
+    line = next(x for x in text.splitlines() if x.startswith("- [text_extra] p.1："))
+    assert "Zulu" in line and "ページの画像で確かめ、画像のとおりなら残す。" in line, line
+    assert "[use_image]" not in text
+
+    # 2回目：p.1 は前の回と同じ指摘だけなので合格する。p.2 は不合格のままで、3回目の指示に [use_image] が入る
+    _write(out, p1, extra)
+    _write(out, p2, bad_fig)
+    assert helpers.revdoc("next", out).ok
+    job = _job(out, jid)
+    assert job["status"] == "issued" and job["tries"] == 2 and job["outputs"] == [p2], job
+    assert re.search(r"^- \[use_image\] p\.2：", helpers.read_text(instruction), re.M)
+
+    # 3回目：図を画像で載せると合格する
+    _write(out, p2, TEXTS[2] + "\n\n![Bravo](figure:0.1,0.5,0.9,0.9)\n\n図の説明：箱と線の図である。\n")
+    r = helpers.revdoc("next", out)
+    assert r.ok and r.data["state"] == "done" and _job(out, jid)["status"] == "done", r.data
+    log = helpers.read_state(out)["log"]
+    assert {"type": "convert_diff", "pdf": "D01", "page": 1, "kind": "extra", "text": "Zulu"} in log, log
+    assert {"type": "figure_switched", "pdf": "D01", "page": 2} in log, log
+    assert "Alpha scheduler starts Zulu" in helpers.read_text(Path(out) / "docs" / "legacy" / "spec" / "001.md")
+    unknowns = helpers.read_text(Path(out) / "docs" / "review" / "unknowns.md").split("\n")
+    for heading, item in (("### 変換で残った違い", "- spec.pdf p.1：余分「Zulu」"), ("### 画像に切り替えた図", "- spec.pdf p.2")):
+        rest = unknowns[unknowns.index(heading) + 1:]
+        end = next((i for i, x in enumerate(rest) if x.startswith("#")), len(rest))
+        assert [x for x in rest[:end] if x.strip()] == [item], unknowns
+
+
+@pytest.mark.parametrize("maker,text_check,checks,rule", [
+    pytest.param(helpers.make_text_pdf, True, [True, True, True], "text_extra", id="text"),
+    pytest.param(lambda p: helpers.make_text_pdf(p, pages=[[(56, 120, TEXTS[1])], [], [(56, 120, TEXTS[3])]]),
+                 True, [True, False, True], "text_extra", id="page_without_text"),
+    pytest.param(helpers.make_image_pdf, False, [False, False], None, id="image_only"),
+    pytest.param(helpers.make_unmapped_pdf, False, [False], None, id="unmapped"),
+    # 対応づけられない文字の割合：3 / 45 前後は 5% を超え、1 / 102 前後は超えない
+    pytest.param(lambda p: helpers.make_unmapped_pdf(p, text="ABC", mapped="B" * 40), False, [False], None,
+                 id="unmapped_over_5_percent"),
+    pytest.param(lambda p: helpers.make_unmapped_pdf(p, text="A", mapped="B" * 99), True, [True], "text_extra",
+                 id="unmapped_under_5_percent"),
 ])
-def test_text_check_decision(tmp_path, maker, text_check, rule):
-    """A-9：文字を Unicode に対応づけられない PDF と画像だけの PDF は、文字列の検査を行わない（SR-37）。"""
+def test_text_check_decision(tmp_path, maker, text_check, checks, rule):
+    """A-9：対応づけられない文字が 5% を超える PDF、画像だけの PDF、埋め込みテキストのないページは、文字列の検査を行わない（SR-37）。"""
     out, job = _convert_start(tmp_path, maker)
     assert helpers.read_plan(out)["pdfs"][0]["text_check"] is text_check
-    for rel in job["outputs"]:
-        assert helpers.read_json(Path(out) / (rel[:-3] + ".json"))["check"] is text_check
+    outputs = sorted(job["outputs"])
+    assert [helpers.read_json(Path(out) / (rel[:-3] + ".json"))["check"] for rel in outputs] == checks
+    for rel in outputs:
         _write(out, rel, "Zulu yankee\n")
     _next_and_assert(out, job["id"], rule)
 
@@ -317,6 +385,26 @@ def test_page_image_and_text(tmp_path):
         assert info["size"] == [pytest.approx(helpers.A4[0], abs=0.01), pytest.approx(helpers.A4[1], abs=0.01)]
         margin = {u["text"].strip(): u["margin"] for u in info["units"]}
         assert margin["SPEC-DOC-0001"] is True and margin["Body one"] is False and margin["1"] is True
+
+
+def test_context_pages(tmp_path):
+    """A-9：変換の仕事を渡すと、書くページの前後1ページの画像などもでき、指示のファイルに読むだけのページとして載る（SR-24、SR-25。6.2、7.3）。"""
+    out, _ = _convert_start(tmp_path, helpers.make_text_pdf, pages=41)
+    jobs = helpers.jobs_with(out, kind="convert")
+    # 1回に渡すのは4件（1〜40 ページ）。41 ページは、4件目の後ろの、読むだけのページである。
+    assert [(j["target"], j["status"]) for j in jobs] == [
+        ("D01:1-10", "issued"), ("D01:11-20", "issued"), ("D01:21-30", "issued"), ("D01:31-40", "issued"),
+        ("D01:41-41", "pending")]
+    folder = os.path.join(os.path.abspath(str(out)), ".work", "pdf", "D01")
+    for ext in ("png", "txt", "json"):
+        assert os.path.isfile(os.path.join(folder, "0041." + ext)), ext
+
+    def instruction(job):
+        return helpers.read_text(Path(out) / ".work" / "jobs" / (job["id"] + ".md"))
+
+    first, fourth = instruction(jobs[0]), instruction(jobs[3])
+    assert "| ページ | 画像 |" in first.splitlines() and os.path.join(folder, "0011.png") in first
+    assert os.path.join(folder, "0030.png") in fourth and os.path.join(folder, "0041.png") in fourth
 
 
 @pytest.mark.parametrize("count,expected", [
@@ -476,6 +564,7 @@ MODULE_CASES = [
     pytest.param("design", _add("- [説明](nosuch.md) を見る。"), "broken_link", id="broken_link"),
     pytest.param("design", _add(_mermaid("flowchart LR", "    a -->|yes| b").rstrip("\n")), "bad_mermaid",
                  id="bad_mermaid"),
+    pytest.param("design", [(DEP, "## 依存関係\n\n### `TASK_*`\n\n" + D_DEP + "\n")], None, id="prefix_star_heading"),
     pytest.param("design", _add("- `ActivateTask` は、おそらく `id` を返す。"), "speculation", id="speculation"),
     pytest.param("design", _add("```c\nint x; /* おそらく */\n```"), None, id="speculation_in_code_block"),
     pytest.param("design", _add("- `ActivateTask` は task.c:4 にある。"), "file_line", id="file_line"),
@@ -524,7 +613,7 @@ def _module_start(tmp_path, design=DESIGN):
 
 @pytest.mark.parametrize("target,edits,rule", MODULE_CASES)
 def test_write_module_checks(tmp_path, target, edits, rule):
-    """A-8：執筆の出力の検査（6.4、5.5、5.7、5.8）が、合格する出力を通し、反する出力を不合格にする（SR-47、SR-48、SR-56、SR-57、SR-58、SR-65）。"""
+    """A-8：執筆の出力の検査（6.4、5.4、5.5、5.7、5.8）が、合格する出力を通し、反する出力を不合格にする（SR-47、SR-48、SR-51、SR-52、SR-56、SR-57、SR-58、SR-65）。"""
     out, job, files, texts = _module_start(tmp_path)
     _write(out, files[target], _edit(texts[target], edits))
     _next_and_assert(out, job["id"], rule)

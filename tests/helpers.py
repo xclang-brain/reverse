@@ -112,7 +112,7 @@ def run_cli(argv, cwd=None, env=None, timeout=600):
     """コマンドとして `python revdoc.py <argv>` を動かし、Result を返す。
 
     Windows の標準出力の改行（\\r\\n）は \\n に直してから確かめる。
-    Python 3.10 以上では、文字コードの警告を出させ、スクリプトの警告を EncodingGuard に渡す。
+    PYTHONWARNDEFAULTENCODING=1 で文字コードの警告を出させ（効くのは Python 3.10 以上）、スクリプトの警告を EncodingGuard に渡す。
     """
     e = dict(os.environ)
     e["PYTHONWARNDEFAULTENCODING"] = "1"
@@ -385,10 +385,12 @@ def make_image_pdf(path, pages=2, size=A4):
     return Path(path)
 
 
-def make_unmapped_pdf(path, pages=1, text="ABCDEF"):
+def make_unmapped_pdf(path, pages=1, text="ABCDEF", mapped=""):
     """文字を Unicode に対応づけられない PDF（Type3 のフォントで、ToUnicode がない）を作り、path を返す。
 
-    全部の文字で FPDFText_HasUnicodeMapError が 1 になる（SR-37 の判定に当たる）。text は A〜Z だけにする。
+    text の全部の文字で FPDFText_HasUnicodeMapError が 1 になる（SR-37 の判定に当たる）。text は A〜Z だけにする。
+    mapped は、各ページの text の下の行に、標準フォントの Helvetica で書く ASCII の文字列である。
+    この文字は対応づけられるので、対応づけられない文字の割合を決められる。
     """
     glyphs = sorted(set(text))
     first, last = ord(glyphs[0]), ord(glyphs[-1])
@@ -397,18 +399,21 @@ def make_unmapped_pdf(path, pages=1, text="ABCDEF"):
     widths = " ".join("600" for _ in range(first, last + 1))
     kids = " ".join("%d 0 R" % (3 + 2 * i) for i in range(pages))
     content = b"BT /F1 12 Tf 72 700 Td (" + text.encode("ascii") + b") Tj ET"
+    if mapped:
+        content += b" BT /F2 12 Tf 72 600 Td (" + mapped.encode("ascii") + b") Tj ET"
     glyph = b"600 0 0 0 500 500 d1 0 0 500 500 re f"
     objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
             b"<< /Type /Pages /Kids [" + kids.encode() + b"] /Count %d >>" % pages]
     for i in range(pages):
-        objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 %d 0 R >> >>"
-                    b" /Contents %d 0 R >>" % (3 + 2 * pages, 4 + 2 * i))
+        objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 %d 0 R"
+                    b" /F2 %d 0 R >> >> /Contents %d 0 R >>" % (3 + 2 * pages, 5 + 2 * pages, 4 + 2 * i))
         objs.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
     objs.append(b"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0]"
                 b" /CharProcs << " + procs.encode() + b" >> /Encoding << /Type /Encoding /Differences [%d " % first
                 + names.encode() + b"] >> /FirstChar %d /LastChar %d /Widths [" % (first, last)
                 + widths.encode() + b"] >>")
     objs.append(b"<< /Length %d >>\nstream\n" % len(glyph) + glyph + b"\nendstream")
+    objs.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
     data = b"%PDF-1.4\n"
     offsets = []
     for i, o in enumerate(objs, 1):

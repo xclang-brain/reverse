@@ -31,7 +31,7 @@
 | `scaled_layout(total_lines, lines_per_file=1000, files_per_folder=20)` | 合計 `total_lines` 行の `layout` を返す（A-2 の 100 万行など）。100 万行のツリーは1秒ほどで作れる。 |
 | `make_text_pdf(path, pages=3, size=A4)` | 埋め込みテキストつきの PDF を作る。`pages` がページの数なら、どのページにも上端の `SPEC-DOC-0001`、本文の2行、右下のページ番号を置く。`[(x, y, 文字列[, 大きさ]), …]` のページのリストで、置く所を決められる（左上からのポイント。y は文字の下端。文字列は ASCII）。2,000 ページで1秒ほど。 |
 | `make_image_pdf(path, pages=2, size=A4)` | 画像だけの PDF（文字の数が 0）を Pillow で作る。各ページに箱と線の図がある。 |
-| `make_unmapped_pdf(path, pages=1, text="ABCDEF")` | 文字を Unicode に対応づけられない PDF を作る。全部の文字で `FPDFText_HasUnicodeMapError` が 1 になる（SR-37、A-9）。`text` は英大文字だけ。 |
+| `make_unmapped_pdf(path, pages=1, text="ABCDEF", mapped="")` | 文字を Unicode に対応づけられない PDF を作る。`text` の全部の文字で `FPDFText_HasUnicodeMapError` が 1 になる（SR-37、A-9）。`text` は英大文字だけ。`mapped` は、対応づけられる文字（Helvetica）として足す ASCII の文字列で、対応づけられない文字の割合を決めるのに使う。 |
 
 ## 担当エージェントの代わり
 
@@ -71,5 +71,5 @@
 ## 文字コードの見張り（A-10）
 
 - `conftest.py` の autouse の fixture が、どのテストでも `EncodingGuard` を有効にする。スクリプトのフォルダのモジュールが、文字コードを指定せずにテキストのファイルを開くと、テストの終わりに失敗にする。ほかのパッケージ（pypdfium2 など）の呼び出しは数えない。
-- `run_cli` では、Python 3.10 以上で `PYTHONWARNDEFAULTENCODING=1` を付け、標準エラーの、スクリプトのファイルの `EncodingWarning` を同じく数える。
+- `run_cli` では、`PYTHONWARNDEFAULTENCODING=1` を付け（効くのは Python 3.10 以上）、標準エラーの、スクリプトのファイルの `EncodingWarning` を同じく数える。
 - 見張りそのものを確かめるときは、`with helpers.EncodingGuard(roots=[tmp_path]) as g:` の中で、`tmp_path` に置いたモジュールを呼び、`g.found`（`ファイル:行` のリスト）を見る。

@@ -27,6 +27,8 @@ SKILL_MD = helpers.REPO / "plugin" / "skills" / "make-design-docs" / "SKILL.md"
 SERVING_DO = ("Tell the user in Japanese: the site URL (url), the folder of the documents (docs), the two review"
               " lists (discrepancies, unknowns), the counts (counts) and the number of failed jobs (failed_jobs)."
               " To stop the server, run: ")
+BUILDING_DO = "The site is not ready yet. Run the same command again: "
+GENERIC_DO = "Tell the user in Japanese what the message says. Then stop."
 # 要件の文書の A-11 のシェル。OS ごとに、その OS のシェルだけを集める（飛ばすテストを作らない）。
 SHELLS = ["powershell", "pwsh", "git-bash"] if os.name == "nt" else ["bash"]
 
@@ -187,6 +189,7 @@ def test_skill_command_runs_from_init_to_stop(tmp_path, shell):
     line = _skill_init_command()
     _assert_one_command(line, placeholders=True)
     command = _fill(line, out, src, pdf)
+    both = "--pdf '" in command  # SKILL.md の行に --pdf がないときは、mode が source になる
     try:
         # init と next を、do のとおりに、serve のコマンドが来るまで動かす
         for _ in range(3000):
@@ -218,7 +221,7 @@ def test_skill_command_runs_from_init_to_stop(tmp_path, shell):
         assert 8000 <= port <= 8099
         assert data["site"] == os.path.join(root, "site")
         assert data["docs"] == os.path.join(root, "docs")
-        assert data["discrepancies"] == os.path.join(root, "docs", "review", "discrepancies.md")
+        assert data["discrepancies"] == (os.path.join(root, "docs", "review", "discrepancies.md") if both else None)
         assert data["unknowns"] == os.path.join(root, "docs", "review", "unknowns.md")
         assert sorted(data["counts"]) == ["changed_inputs", "discrepancies", "modules", "unknowns"]
         assert data["failed_jobs"] == 0
@@ -260,13 +263,48 @@ def test_serve_before_done_is_refused(tmp_path):
     assert not (out / ".work" / "serve.json").exists()
 
 
+def _sleeping_child():
+    """pid を記録に書くための、何もしないプロセスを始める（止めるときに、テストのプロセスを巻き込まない）。"""
+    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], **kw)
+
+
+def test_serve_building_and_failed(tmp_path):
+    """A-11：サーバーが 20 秒たっても応答しないと building と呼び直しの do を返し、ビルドが失敗すると serve_failed を返す（SR-70。11.1）。"""
+    out = tmp_path / "out"
+    r = helpers.run_to_done(out, src=helpers.make_source_tree(tmp_path / "src"))
+    assert r.ok and r.data["state"] == "done", r.data
+    record = out / ".work" / "serve.json"
+    child = _sleeping_child()
+    try:
+        # 15 秒以内の building の記録があるので、新しいプロセスを始めず、20 秒待って building を返す（11.1 の 2、3）
+        with open(record, "w", encoding="utf-8", newline="\n") as f:
+            f.write('{"state":"building","pid":%d,"port":0,"url":"","time":%d}' % (child.pid, int(time.time())))
+        r = helpers.revdoc("serve", out)
+        assert r.data == {"ok": True, "state": "building", "do": BUILDING_DO + _cmd("serve", out)}
+        assert helpers.read_json(record)["pid"] == child.pid
+    finally:
+        child.kill()
+        child.wait()
+
+    # 記録は 15 秒より古くなったので、次の serve は新しいプロセスを始める。壊した mkdocs.yml では、ビルドが失敗する。
+    with open(out / "mkdocs.yml", "w", encoding="utf-8", newline="\n") as f:
+        f.write("nav: [\n")
+    try:
+        r = helpers.revdoc("serve", out)
+        assert r.code == 1 and r.data["error"] == "serve_failed" and r.data["do"] == GENERIC_DO, r.data
+        assert isinstance(r.data["log"], list) and len(r.data["log"]) <= 20
+        assert all(isinstance(x, str) for x in r.data["log"])
+    finally:
+        _stop_quietly(out)
+
+
 def test_stop_ignores_stale_server_record(tmp_path):
     """A-11：serve.json の time が 15 秒より前のとき、stop はプロセスを止めずに記録を消す（SR-71、11.2）。"""
     out = tmp_path / "out"
     src = helpers.make_source_tree(tmp_path / "src")
     assert helpers.revdoc("init", out, src=src).ok
-    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], **kw)
+    child = _sleeping_child()
     try:
         record = '{"state":"serving","pid":%d,"port":8000,"url":"http://127.0.0.1:8000/","time":%d}' \
                  % (child.pid, int(time.time()) - 100)
