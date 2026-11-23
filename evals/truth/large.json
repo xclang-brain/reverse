@@ -1,0 +1,259 @@
+{
+  "changes": [
+    {
+      "file": "include/kernel.h",
+      "names": [
+        "TMAX_TPRI"
+      ],
+      "line": 467,
+      "before_line": "#define TMAX_TPRI\t\t16\t\t\t/* タスク優先度の最大値（最低値）*/",
+      "after_line": "#define TMAX_TPRI\t\t8\t\t\t/* タスク優先度の最大値（最低値）*/",
+      "before_value": "16",
+      "after_value": "8",
+      "pages": [
+        88
+      ],
+      "spec_text": "ASPカーネルでは，タスク優先度の最大値（TMAX_TPRI）は16に固定されている【ASPS0014】．"
+    },
+    {
+      "file": "kernel/check.h",
+      "names": [
+        "VALID_RELTIM",
+        "dly_tsk",
+        "sta_alm"
+      ],
+      "line": 73,
+      "before_line": "#define VALID_RELTIM(reltim)\t((reltim) <= TMAX_RELTIM)",
+      "after_line": "#define VALID_RELTIM(reltim)\t((reltim) < TMAX_RELTIM)",
+      "before_value": "<=",
+      "after_value": "<",
+      "pages": [
+        131,
+        260
+      ],
+      "spec_text": "E_PAR パラメータエラー ・dlytimがTMAX_RELTIMより大きい【NGKI1351】"
+    },
+    {
+      "file": "kernel/semaphore.c",
+      "names": [
+        "sig_sem"
+      ],
+      "line": 167,
+      "before_line": "\telse if (p_semcb->semcnt < p_semcb->p_seminib->maxsem) {",
+      "after_line": "\telse if (p_semcb->semcnt <= p_semcb->p_seminib->maxsem) {",
+      "before_value": "<",
+      "after_value": "<=",
+      "pages": [
+        146
+      ],
+      "spec_text": "資源数に1を加えるとそのセマフォの最大資源数を越える場合には，E_QOVRエラーとなる【NGKI1509】．"
+    },
+    {
+      "file": "kernel/eventflag.c",
+      "names": [
+        "wai_flg"
+      ],
+      "line": 271,
+      "before_line": "\t\tercd = E_ILUSE;",
+      "after_line": "\t\tercd = E_OBJ;",
+      "before_value": "E_ILUSE",
+      "after_value": "E_OBJ",
+      "pages": [
+        157
+      ],
+      "spec_text": "E_ILUSE サービスコール不正使用 ・TA_WMUL属性でないイベントフラグで待ちタスクあり【NGKI1632】"
+    },
+    {
+      "file": "kernel/pridataq.c",
+      "names": [
+        "snd_pdq"
+      ],
+      "line": 298,
+      "before_line": "\tCHECK_PAR(TMIN_DPRI <= datapri && datapri <= p_pdqcb->p_pdqinib->maxdpri);",
+      "after_line": "\tCHECK_PAR(TMIN_DPRI < datapri && datapri <= p_pdqcb->p_pdqinib->maxdpri);",
+      "before_value": "<=",
+      "after_value": "<",
+      "pages": [
+        181
+      ],
+      "spec_text": "datapriは，TMIN_DPRI以上で，対象データキューに送信できるデータ優先度の最大値以下でなければならない．そうでない場合には，E_PARエラーとなる【NGKI1876】．"
+    },
+    {
+      "file": "kernel/mutex.c",
+      "names": [
+        "loc_mtx"
+      ],
+      "line": 366,
+      "before_line": "\t\t\t\t&& p_runtsk->bpriority < p_mtxcb->p_mtxinib->ceilpri) {",
+      "after_line": "\t\t\t\t&& p_runtsk->bpriority > p_mtxcb->p_mtxinib->ceilpri) {",
+      "before_value": "<",
+      "after_value": ">",
+      "pages": [
+        202
+      ],
+      "spec_text": "対象ミューテックスが優先度上限ミューテックスで，その上限優先度より自タスクのベース優先度が高い場合には，E_ILUSEエラーとなる【NGKI2085】．"
+    },
+    {
+      "file": "kernel/interrupt.c",
+      "names": [
+        "VALID_INTPRI_CHGIPM",
+        "chg_ipm"
+      ],
+      "line": 135,
+      "before_line": "\t\t\t\t\t(TMIN_INTPRI <= (intpri) && (intpri) <= TIPM_ENAALL)",
+      "after_line": "\t\t\t\t\t(TMIN_INTPRI <= (intpri) && (intpri) < TIPM_ENAALL)",
+      "before_value": "(intpri) <= TIPM_ENAALL",
+      "after_value": "(intpri) < TIPM_ENAALL",
+      "pages": [
+        316
+      ],
+      "spec_text": "intpriは，TMIN_INTPRI以上，TIPM_ENAALL以下でなければならない．そうでない場合には，E_PARエラーとなる【NGKI3113】．"
+    },
+    {
+      "file": "kernel/task_sync.c",
+      "names": [
+        "wup_tsk"
+      ],
+      "line": 240,
+      "before_line": "\t\tercd = E_QOVR;\t\t\t\t\t\t\t/*［NGKI1274］*/",
+      "after_line": "\t\tercd = E_OBJ;\t\t\t\t\t\t\t/*［NGKI1274］*/",
+      "before_value": "E_QOVR",
+      "after_value": "E_OBJ",
+      "pages": [
+        124
+      ],
+      "spec_text": "起床要求キューイング数に1を加えるとTMAX_WUPCNTを超える場合には，E_QOVRエラーとなる【NGKI1274】．"
+    },
+    {
+      "file": "kernel/dataqueue.c",
+      "names": [
+        "fsnd_dtq"
+      ],
+      "line": 451,
+      "before_line": "\tCHECK_ILUSE(p_dtqcb->p_dtqinib->dtqcnt > 0U);",
+      "after_line": "\tCHECK_ILUSE(p_dtqcb->p_dtqinib->dtqcnt > 1U);",
+      "before_value": "0U",
+      "after_value": "1U",
+      "pages": [
+        168
+      ],
+      "spec_text": "E_ILUSE サービスコール不正使用 ・対象データキューのデータキュー管理領域のサイズが0【NGKI1746】"
+    },
+    {
+      "file": "kernel/sys_manage.c",
+      "names": [
+        "rot_rdq"
+      ],
+      "line": 171,
+      "before_line": "\tif (tskpri == TPRI_SELF && !sense_context()) {",
+      "after_line": "\tif (tskpri != TPRI_SELF && !sense_context()) {",
+      "before_value": "==",
+      "after_value": "!=",
+      "pages": [
+        273
+      ],
+      "spec_text": "rot_rdqにおいて，tskpriにTPRI_SELF（＝0）を指定すると，自タスクのベース優先度が対象優先度となる【NGKI2689】．"
+    }
+  ],
+  "false_statements": [
+    "`include/kernel.h` では、`TMAX_TPRI` は `16` と定義されていて、タスク優先度は `1` から `16` までである。",
+    "`kernel/semaphore.c` の `sig_sem` は、`semcnt` が `maxsem` に達しているときは資源数を増やさずに `E_QOVR` を返す。",
+    "`kernel/eventflag.c` の `wai_flg` は、`TA_WMUL` 属性でないイベントフラグに待ちタスクがあるときは `E_ILUSE` を返す。",
+    "`kernel/mutex.c` の `loc_mtx` は、優先度上限ミューテックスで、自タスクの `bpriority` が `ceilpri` より小さい（優先度が高い）ときは `E_ILUSE` を返す。",
+    "`kernel/task_sync.c` の `wup_tsk` は、対象タスクの `wupque` がすでに `true` のときは `E_QOVR` を返す。"
+  ],
+  "legacy_only": [
+    {
+      "words": [
+        "1999",
+        "2002"
+      ],
+      "page": 8,
+      "text": "μITRON4.0仕様は1999年に，μITRON4.0/PX仕様は2002年に公表されたが，それ以降現在までの間に，大きな仕様改訂は実施されていない．"
+    },
+    {
+      "words": [
+        "HRP2",
+        "保護機能"
+      ],
+      "page": 12,
+      "text": "HRP2カーネルは，保護機能対応カーネルであり，マルチプロセッサ対応カーネル，動的生成対応カーネルではない【HRPS0001】．"
+    },
+    {
+      "words": [
+        "ユーザドメイン",
+        "32"
+      ],
+      "page": 23,
+      "text": "この仕様では，システムに登録できるユーザドメインの数は，32個以下に制限する【NGKI0084】．"
+    },
+    {
+      "words": [
+        "TCLS_SELF",
+        "TA_CLS"
+      ],
+      "page": 62,
+      "text": "ここでclsidは，そのオブジェクトを属させるクラスのID番号であり，clsidにTCLS_SELF（＝0）を指定するか，オブジェクト属性にTA_CLS(clsid)を指定しないことで，自タスクが属するクラスに属させることができる．"
+    },
+    {
+      "words": [
+        "SSP",
+        "スタック領域"
+      ],
+      "page": 99,
+      "text": "SSPカーネルは，制約タスクのみをサポートすることから，すべてのタスクでスタック領域を共有しており，タスク毎にスタック領域の情報を持たない【SSPS0102】．"
+    },
+    {
+      "words": [
+        "ATT_MOD",
+        "標準メモリリージョン"
+      ],
+      "page": 283,
+      "text": "標準メモリリージョンとは，ATT_MOD／ATA_MODによって，オブジェクトモジュールに含まれる標準のセクションが配置されるメモリリージョンである．"
+    },
+    {
+      "words": [
+        "ATT_REG",
+        "メモリリージョン"
+      ],
+      "page": 286,
+      "text": "ATT_REG メモリリージョンの登録〔SP〕【NGKI2799】"
+    },
+    {
+      "words": [
+        "ATT_SEC",
+        "セクションの登録"
+      ],
+      "page": 288,
+      "text": "ATT_SEC セクションの登録〔SP〕【NGKI2818】"
+    },
+    {
+      "words": [
+        "prb_mem",
+        "アクセス権"
+      ],
+      "page": 298,
+      "text": "prb_mem メモリ領域に対するアクセス権のチェック〔TP〕【NGKI2924】"
+    },
+    {
+      "words": [
+        "def_svc",
+        "拡張サービスコール"
+      ],
+      "page": 324,
+      "text": "def_svc 拡張サービスコールの定義〔TPD〕【NGKI3169】"
+    }
+  ],
+  "check_pages": [
+    363,
+    364,
+    378,
+    379,
+    380,
+    381,
+    382,
+    383,
+    384,
+    385
+  ]
+}

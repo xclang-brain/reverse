@@ -1,0 +1,263 @@
+{
+  "changes": [
+    {
+      "file": "kernel/task_manage.c",
+      "names": [
+        "ActivateTask"
+      ],
+      "line": 148,
+      "before_line": "\t\tS_D_CHECK_LIMIT(p_tcb->actcnt < p_tcb->p_tinib->maxact);",
+      "after_line": "\t\tS_D_CHECK_LIMIT(p_tcb->actcnt <= p_tcb->p_tinib->maxact);",
+      "before_value": "<",
+      "after_value": "<=",
+      "pages": [
+        5
+      ],
+      "spec_text": "起動要求時に最大起動要求回数に達していない場合，起動要求回数がタスクごとにインクリメントされ，多重に起動要求されているタスクが終了した後，再度起動される【NOS0364】．"
+    },
+    {
+      "file": "kernel/task_manage.c",
+      "names": [
+        "GetTaskState"
+      ],
+      "line": 375,
+      "before_line": "\t*State = (p_tcb == p_runtsk) ? RUNNING : p_tcb->tstat;",
+      "after_line": "\t*State = (p_tcb == p_runtsk) ? READY : p_tcb->tstat;",
+      "before_value": "RUNNING",
+      "after_value": "READY",
+      "pages": [
+        1,
+        6
+      ],
+      "spec_text": "実行状態(RUNNING) タスクがコアに割付けられ，タスクの処理を実行している状態．"
+    },
+    {
+      "file": "kernel/task.h",
+      "names": [
+        "TMIN_TPRI"
+      ],
+      "line": 78,
+      "before_line": "#define TMIN_TPRI\t\tUINT_C(0)       /* タスク優先度の最小値（最低値）*/",
+      "after_line": "#define TMIN_TPRI\t\tUINT_C(1)       /* タスク優先度の最小値（最低値）*/",
+      "before_value": "UINT_C(0)",
+      "after_value": "UINT_C(1)",
+      "pages": [
+        7
+      ],
+      "spec_text": "タスク優先度の最小値は 0 である【COS0441】．"
+    },
+    {
+      "file": "kernel/task.c",
+      "names": [
+        "make_runnable"
+      ],
+      "line": 269,
+      "before_line": "\t\tif (pri >= schedpri) {",
+      "after_line": "\t\tif (pri > schedpri) {",
+      "before_value": ">=",
+      "after_value": ">",
+      "pages": [
+        7,
+        8
+      ],
+      "spec_text": "同じ優先度のタスクが複数存在する場合，最初に実行可能状態もしくは実行状態に遷移したタスクを，次の実行タスクとする【COS0450】．"
+    },
+    {
+      "file": "kernel/task.c",
+      "names": [
+        "suspend"
+      ],
+      "line": 371,
+      "before_line": "\tif (p_runtsk->actcnt > 0U) {",
+      "after_line": "\tif (p_runtsk->actcnt > 1U) {",
+      "before_value": "0U",
+      "after_value": "1U",
+      "pages": [
+        5
+      ],
+      "spec_text": "起動要求時に最大起動要求回数に達していない場合，起動要求回数がタスクごとにインクリメントされ，多重に起動要求されているタスクが終了した後，再度起動される【NOS0364】．"
+    },
+    {
+      "file": "kernel/event.c",
+      "names": [
+        "WaitEvent"
+      ],
+      "line": 254,
+      "before_line": "\tCHECK_ACCESS(TSKID(p_runtsk) < tnum_exttask);",
+      "after_line": "\tCHECK_ACCESS(TSKID(p_runtsk) <= tnum_exttask);",
+      "before_value": "<",
+      "after_value": "<=",
+      "pages": [
+        2,
+        6
+      ],
+      "spec_text": "なお，基本タスクは待ち状態に入ることはできない≪COS3549≫．"
+    },
+    {
+      "file": "kernel/counter.c",
+      "names": [
+        "insert_cnt_expr_que"
+      ],
+      "line": 125,
+      "before_line": "\t\t\t\t (((CNTEXPINFO *) next)->expiretick <= enqval)))) {",
+      "after_line": "\t\t\t\t (((CNTEXPINFO *) next)->expiretick < enqval)))) {",
+      "before_value": "<=",
+      "after_value": "<",
+      "pages": [
+        16
+      ],
+      "spec_text": "複数のアラーム，あるいは複数のスケジュールテーブルの満了処理が同じ満了点に存在する場合，先にセットされたものから順に満了処理を実行する【NOS1572】．"
+    },
+    {
+      "file": "kernel/counter.c",
+      "names": [
+        "counter_initialize"
+      ],
+      "line": 251,
+      "before_line": "\t\tp_cntcb->curval = 0U;",
+      "after_line": "\t\tp_cntcb->curval = 1U;",
+      "before_value": "0U",
+      "after_value": "1U",
+      "pages": [
+        21
+      ],
+      "spec_text": "ソフトウェアカウンタの初期値は 0 とし，ハードウェアカウンタの初期値は init_hwcounter_<counter id>でユーザが設定する【NOS0396】．"
+    },
+    {
+      "file": "kernel/counter_manage.c",
+      "names": [
+        "GetCounterValue"
+      ],
+      "line": 169,
+      "before_line": "\t\tcurval -= (p_cntcb->p_cntinib->maxval + 1U);",
+      "after_line": "\t\tcurval -= (p_cntcb->p_cntinib->maxval);",
+      "before_value": "maxval + 1U",
+      "after_value": "maxval",
+      "pages": [
+        17
+      ],
+      "spec_text": "カウンタのティックは，カウンタ最大値(OsCounterMaxAllowedValue)までインクリメントされ，カウント値がカウンタ最大値であるカウンタに対して，IncrementCounter を発行すると，カウント値は 0 となる【OSa001】．"
+    },
+    {
+      "file": "kernel/alarm.c",
+      "names": [
+        "alarm_expire"
+      ],
+      "line": 431,
+      "before_line": "\tif (p_almcb->cycle > 0U) {",
+      "after_line": "\tif (p_almcb->cycle > 1U) {",
+      "before_value": "0U",
+      "after_value": "1U",
+      "pages": [
+        24
+      ],
+      "spec_text": "初回起動後，2 回目以降の起動周期を指定する【COS0922】．2 回目以降の起動周期を 0 とすることで，単発アラームとして指定することが可能である．"
+    }
+  ],
+  "false_statements": [
+    "`ActivateTask` は、休止状態でないタスクの `actcnt` が `maxact` より小さいときだけ `actcnt` に1を足し、`maxact` に達しているときは `E_OS_LIMIT` にする。",
+    "`GetTaskState` は、指定したタスクが `p_runtsk` のとき、状態として `RUNNING` を返す。",
+    "`TMIN_TPRI` は、タスク優先度の最小値で、`UINT_C(0)` と定義されている。",
+    "`counter_initialize` は、すべてのカウンタの `curval` を `0U` にする。",
+    "`alarm_expire` は、`cycle` が `0U` より大きいとき、`expiretick` に `cycle` を足して、満了のキューに入れ直す。"
+  ],
+  "legacy_only": [
+    {
+      "words": [
+        "OSAP",
+        "強制終了",
+        "起動要求"
+      ],
+      "page": 5,
+      "text": "多重に起動要求されているタスクが所属する OSAP が強制終了した場合は，再度起動されず，起動要求はクリアされる【NOS0381】．"
+    },
+    {
+      "words": [
+        "SC2",
+        "SC4",
+        "タイミング保護"
+      ],
+      "page": 6,
+      "text": "SC2，SC4 ではタスクにタイミング保護機能が適用される(詳細は 2.17.2 節を参照)．"
+    },
+    {
+      "words": [
+        "割込み禁止",
+        "ディスパッチ",
+        "保留"
+      ],
+      "page": 14,
+      "text": "割込み禁止状態となっているコアに対して，ディスパッチを伴うシステムサービスを発行した場合，その割込み禁止状態が解除されるまで，ディスパッチが保留される【NOS0919】．"
+    },
+    {
+      "words": [
+        "OSEK",
+        "システムカウンタ"
+      ],
+      "page": 16,
+      "text": "OSEK 仕様では，システムカウンタは少なくとも 1 つ常に存在すると規定している【COS3686】．"
+    },
+    {
+      "words": [
+        "非信頼",
+        "OSAP",
+        "カウンタ"
+      ],
+      "page": 17,
+      "text": "非信頼 OSAP に属するタスクから他 OSAP に属するカウンタをインクリメントすることは出来ない【NOS1567】．"
+    },
+    {
+      "words": [
+        "AUTOSAR",
+        "OsCounterAccessingApplication"
+      ],
+      "page": 17,
+      "text": "また，AUTOSAR 仕様では，OsCounterAccessingApplication コンテナによりある OSAP に対してあるカウンタへのアクセス権を付与することが出来る．"
+    },
+    {
+      "words": [
+        "最大値",
+        "ユーザ責任"
+      ],
+      "page": 18,
+      "text": "ただし，カウンタの最大値よりも遅延したものについては動作を保証せず，ユーザ責任とする【NOS1574】．"
+    },
+    {
+      "words": [
+        "GPT",
+        "タイマ"
+      ],
+      "page": 21,
+      "text": "OS が直接タイマの操作を行い，GPT ドライバが使用しないすべてのタイマの初期化と設定を行う【OS374】．"
+    },
+    {
+      "words": [
+        "アラームコールバック",
+        "メモリ保護"
+      ],
+      "page": 24,
+      "text": "アラームコールバックが SC2，SC3，SC4 で使用できない理由は，アラームコールバックに対するタイミング保護やメモリ保護の実現が非効率であるからである．"
+    },
+    {
+      "words": [
+        "非信頼",
+        "OSAP",
+        "アラーム"
+      ],
+      "page": 25,
+      "text": "したがって，非信頼 OSAP に所属するカウンタに対して，他の OSAP に所属するアラームを接続することはできない【NOS1129】．"
+    }
+  ],
+  "check_pages": [
+    3,
+    4,
+    8,
+    9,
+    11,
+    12,
+    13,
+    15,
+    19,
+    23
+  ]
+}
