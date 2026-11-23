@@ -145,7 +145,7 @@ class Sources:
         self.out, self.plan = out, plan
         self.files = {f["path"]: f for f in plan["files"]}
         self.path_words = Words(w for rel in self.files for w in WORD.findall(rel))
-        self._lines, self._words = {}, {}
+        self._lines, self._words, self._names = {}, {}, None
 
     def read_path(self, rel):
         """担当エージェントに読ませるパス（2.2）。"""
@@ -163,6 +163,13 @@ class Sources:
             self._words[rel] = Words(WORD.findall("\n".join(self.lines(rel))))
         return self._words[rel]
 
+    @property
+    def names(self):
+        """名前の集まり（2.9）。"""
+        if self._names is None:
+            self._names = Words(files.split_lines(files.read_text(os.path.join(self.out, ".work", "names.txt"))))
+        return self._names
+
     def location_problem(self, rel, start, end, limit=True):
         """根拠の場所が正しくないときは、その説明を返す。"""
         loc = "`[%s:%d-%d]`" % (rel, start, end)
@@ -175,16 +182,17 @@ class Sources:
             return "根拠の場所 %s の範囲が %d 行を超える。範囲を狭める。" % (loc, values.MAX_LOCATION_LINES)
         return None
 
-    def word_problems(self, locations, text):
-        """語の検査（5.3）。locations は正しい根拠の場所の (相対パス, 開始行, 終了行)。(検査の名前, 説明) を返す。"""
+    def word_problems(self, locations, text, memo=False):
+        """語の検査（5.3）。locations は正しい根拠の場所の (相対パス, 開始行, 終了行)。(検査の名前, 説明) を返す。
+        memo のとき（解析メモ）は、(a) を根拠のファイルの代わりに名前の集まりと照らす。"""
         words = span_words(text)
         if not words:
             return []
         found = []
-        unknown = [w for w, p in words
-                   if not (self.path_words.has(w, p) or any(self.words(r).has(w, p) for r, _, _ in locations))]
+        known = [self.names] if memo else [self.words(r) for r, _, _ in locations]
+        unknown = [w for w, p in words if not (self.path_words.has(w, p) or any(k.has(w, p) for k in known))]
         if unknown:
-            found.append(("unknown_word", "`%s` が、根拠のファイルにない。" % "`、`".join(unknown)))
+            found.append(("unknown_word", "`%s` が、%sにない。" % ("`、`".join(unknown), "ソースコード" if memo else "根拠のファイル")))
         ranges = [Words(WORD.findall("\n".join(self.lines(r)[s - 1:e]) + "\n" + r)) for r, s, e in locations]
         if not any(r.has(w, p) for r in ranges for w, p in words):
             found.append(("no_word_in_range", "バッククォートの中の語が、根拠の場所の行の範囲に1つもない。"))

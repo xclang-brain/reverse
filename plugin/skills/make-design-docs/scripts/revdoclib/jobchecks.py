@@ -79,11 +79,11 @@ def check_analyze(ctx, job):
         sections[-1]["items"] += 1
         loc = (m.group(1), int(m.group(2)), int(m.group(3)))
         locations.append(loc)
-        problem = src.location_problem(*loc)
+        problem = src.location_problem(*loc, limit=sections[-1]["name"] != values.MEMO_HEADINGS[0])
         if problem:
             found.append(item("bad_location", rel, k, problem))
             continue
-        found += [item(rule, rel, k, detail) for rule, detail in src.word_problems([loc], m.group(4))]
+        found += [item(rule, rel, k, detail) for rule, detail in src.word_problems([loc], m.group(4), memo=True)]
     if [s["name"] for s in sections] != list(values.MEMO_HEADINGS):
         found.append(item("missing_heading", rel, None, "%dつの見出しが、決まった順にそろっていない。" % len(values.MEMO_HEADINGS)))
     for s in sections:
