@@ -483,8 +483,9 @@ def c2_c3(run):
     else:
         rows = [(a, row["text"]) for a, _, row in judged if row is not None]
         facts = [(a, text) for a, text in rows if a["verdict"] != "事実を述べていない"]
-        correct = sum(a["verdict"] == "正しい" and not a["names_unquoted"] and not a["missing_condition"]
-                      and run.quote_found(a) and (text.startswith("```") or not run.unknown_words(text))
+        # コードブロックの行では、名前をバッククォートで囲めないので、names_unquoted と unknown_words を見ない
+        correct = sum(a["verdict"] == "正しい" and not a["missing_condition"] and run.quote_found(a)
+                      and (text.startswith("```") or not (a["names_unquoted"] or run.unknown_words(text)))
                       for a, text in facts)
         fr_ok, fr_n = c2_fr(run, picked["fr"])
         empty = [cat for cat in picked if not picked[cat]]
