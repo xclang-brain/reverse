@@ -218,7 +218,7 @@ docs/                                要求、要件、設計
 - Claude Code では、フックで、担当エージェントの書き込みを出力先の中に限る（SR-86）。指示だけでは、約 700 回に1回、担当エージェントが作業フォルダに関係のないファイルを作った。大きい材料では、担当エージェントを 3,000 回以上呼ぶ。
   - `hooks/hooks.json` に、Write と Edit の前に動くフック（PreToolUse）を1つ書く。コマンドは `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" || py -3 "…" || python "…" || exit 0` とする。Python が見つからないときと、スクリプトが失敗したときは、書き込みを通す。
   - `guard.py` は、標準入力の JSON を読む。`agent_type` が `reverse:` で始まらないときは、何も出さずに終わる（ほかの作業の書き込みに触らない）。
-  - 書く先（`tool_input.file_path`。相対パスは `cwd` から）の親のフォルダを上へたどり、`.work/state.json` があるフォルダを、出力先とする。書く先が、出力先の `.work/` か `docs/` の下にあり、`.work/state.json` と `.work/plan.json` でないときだけ、通す。
+  - 書く先（`tool_input.file_path`。相対パスは `cwd` から）の親のフォルダを上へたどり、`.work/state.json` があるフォルダを、出力先とする。書く先は、シンボリックリンクを解いたパスで比べる（リンクを通して、出力先の外に書かせない）。書く先が、出力先の `.work/` か `docs/` の下にあり、`.work/state.json` と `.work/plan.json` でないときだけ、通す。
   - 止めるときは、終了コード 0 で、`{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "<理由>"}}` を標準出力に書く。理由は、英語の1文で、指示のファイルの「書く先」だけに書くように伝える。
   - `guard.py` は、標準ライブラリだけを使い、古い Python でも動く書き方にする（`revdoc.py` と同じ）。
 - 解析、照合、執筆、検証の指示には、「ソースコードについての記述の根拠は、対象のソースファイルだけ」と書く。照合の指示には「既存の設計書の内容の根拠は、番号を振った行だけ」、執筆の指示には「既存の設計書の内容の根拠は、渡した照合の記録だけ」と続けて書く。
