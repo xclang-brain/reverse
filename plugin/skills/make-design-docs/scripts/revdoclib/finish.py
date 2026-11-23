@@ -16,7 +16,7 @@ REVIEW_DIR = "docs/review"
 DIFF_KINDS = {"missing": "欠け", "extra": "余分"}
 _PLAIN_PATH = re.compile(r"[A-Za-z0-9._\-/~]+")
 
-MKDOCS_FIXED = """docs_dir: docs
+MKDOCS_FIXED = r"""docs_dir: docs
 site_dir: site
 theme:
   name: material
@@ -26,7 +26,9 @@ theme:
     - navigation.prune
 plugins:
   - search:
-      lang: ja
+      lang: en
+      separator: '[\s\-,:!=\[\]()"/\u3000-\u303f\u3041-\u309f\uff00-\uffef]+'
+      pipeline: []
   - privacy:
       cache_dir: .work/privacy
 markdown_extensions:

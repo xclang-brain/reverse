@@ -133,7 +133,7 @@ def make_match_jobs(ctx):
                 page = int(m.group(1)) if m else page
                 pages[e.start] = page
             body = {e for e in elems if e.kind in markdown.BODY}
-            for chunk in markdown.split_numbered(elems, body, values.MATCH_LINES):
+            for chunk in markdown.split_numbered(elems, body, values.NUMBERED_LINES):
                 job_id = _add_job(ctx, "match", rel, chunk)
                 markdown.write_numbered(ctx.out, ".work/match", job_id, rel, lines, elems, chunk,
                                         lambda e: {"page": pages[e.start]})
@@ -329,14 +329,27 @@ def verify_files(ctx):
     return found
 
 
+def _matched_figures(ctx):
+    """照合の記録の「一致した図」（8.3 の 6）の文。"""
+    found = set()
+    for job in (j for j in ctx.state["jobs"] if j["kind"] == "write_module"):
+        path = ctx.abs(".work/records/%s.md" % job["id"])
+        if os.path.isfile(path):
+            lines = jobchecks.read_lines(path)
+            found |= {markdown.elem_text(lines, e) for e in markdown.parse(lines) if e.kind == "code"}
+    return found
+
+
 def _targets(ctx, rel):
     """対象にする行。(ファイルの行, 要素, [(要素, 見出し, SHA-1)]) を返す。"""
     lines = jobchecks.read_lines(ctx.abs(rel))
     elems = markdown.parse(lines)
     skip = set(ctx.state["confirmed"].get(rel, []))
+    figures = _matched_figures(ctx)
     found = []
     for e, heading, sha in line_hashes(lines, elems):
-        if sha not in skip and markdown.elem_text(lines, e).strip() != ctx.plan["none_sentence"]:
+        text = markdown.elem_text(lines, e)
+        if sha not in skip and text.strip() != ctx.plan["none_sentence"] and not (e.kind == "code" and text in figures):
             found.append((e, heading, sha))
         skip.add(sha)  # 同じ節の同じ文は、1つの番号で確かめる
     return lines, elems, found
@@ -351,7 +364,7 @@ def _make_verify_jobs(ctx):
     for rel in verify_files(ctx):
         lines, elems, rows = _targets(ctx, rel)
         sha = {e: h for e, _, h in rows}
-        for chunk in markdown.split_numbered(elems, set(sha), values.VERIFY_LINES):
+        for chunk in markdown.split_numbered(elems, set(sha), values.NUMBERED_LINES):
             job_id = _add_job(ctx, "verify", rel, chunk)
             markdown.write_numbered(ctx.out, ".work/verify", job_id, rel, lines, elems, chunk,
                                     lambda e: {"sha1": sha[e]})

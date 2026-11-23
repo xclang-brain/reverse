@@ -59,7 +59,10 @@ MKDOCS_COMMON = {
     "docs_dir": "docs",
     "site_dir": "site",
     "theme": {"name": "material", "language": "ja", "font": False, "features": ["navigation.prune"]},
-    "plugins": [{"search": {"lang": "ja"}}, {"privacy": {"cache_dir": ".work/privacy"}}],
+    "plugins": [{"search": {"lang": "en",
+                            "separator": r'[\s\-,:!=\[\]()"/\u3000-\u303f\u3041-\u309f\uff00-\uffef]+',
+                            "pipeline": []}},
+                {"privacy": {"cache_dir": ".work/privacy"}}],
     "markdown_extensions": ["tables", {"pymdownx.superfences": {"custom_fences": [
         {"name": "mermaid", "class": "mermaid",
          "format": "!!python/name:pymdownx.superfences.fence_code_format"}]}}],
@@ -366,12 +369,12 @@ def test_assemble_split(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_match_split(tmp_path):
-    """A-8：照合の仕事は、docs/legacy/ の本文の行を、見出しの切れ目で 100 行までに分けたものになる（SR-41。5.6、8.2）。"""
+    """A-8：照合の仕事は、docs/legacy/ の本文の行を、見出しの切れ目で 50 行までに分けたものになる（SR-41。5.6、8.2）。"""
     pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
     out = _start(tmp_path, "convert", pdf=pdf)
     job = helpers.jobs_with(out, status="issued", kind="convert")[0]
-    pages = [["## A", ""] + _body("A", 60) + ["", "## B", ""] + _body("B", 50) + ["", "## C", ""] + _body("C", 230),
-             ["## D", ""] + _body("D", 30)]
+    pages = [["## A", ""] + _body("A", 30) + ["", "## B", ""] + _body("B", 25) + ["", "## C", ""] + _body("C", 115),
+             ["## D", ""] + _body("D", 15)]
     for rel, lines in zip(job["outputs"], pages):
         _write(out, rel, "\n".join(lines) + "\n")
     assert helpers.revdoc("next", out).ok and helpers.read_state(out)["stage"] == "match"
@@ -379,11 +382,11 @@ def test_match_split(tmp_path):
     legacy = _file_lines(Path(out) / "docs" / "legacy" / "spec" / "001.md")
     jobs = helpers.jobs_with(out, kind="match")
     infos = [helpers.read_json(Path(out) / ".work" / "match" / (j["id"] + ".json")) for j in jobs]
-    # 5.6 の例と同じ：60、50、230、30 行の節は、60、50、100、100、30 + 30 行の5つの仕事になる
-    assert [i["count"] for i in infos] == [60, 50, 100, 100, 60]
+    # 5.6 の例と同じ：30、25、115、15 行の節は、30、25、50、50、15 + 15 行の5つの仕事になる
+    assert [i["count"] for i in infos] == [30, 25, 50, 50, 30]
     assert all(i["file"] == "docs/legacy/spec/001.md" for i in infos)
     assert [legacy[i["lines"][0]["line"] - 1] for i in infos] == [
-        "A の本文 1 である。", "B の本文 1 である。", "C の本文 1 である。", "C の本文 101 である。", "C の本文 201 である。"]
+        "A の本文 1 である。", "B の本文 1 である。", "C の本文 1 である。", "C の本文 51 である。", "C の本文 101 である。"]
     assert [j["target"] for j in jobs] == ["legacy/spec/001.md:%d" % i["lines"][0]["line"] for i in infos]
 
 
@@ -488,7 +491,7 @@ SPEC_ROW = "| 0 | おそらく割込み処理に使う |"
 
 
 def test_legacy_only_inserted(tmp_path):
-    """A-8：「既存設計書のみ」の記録が、印つきで設計書の見出しの下に入り、1,000 行を超える分は続きのファイルに入り、推測の言い回しのある表を含んでも done の後の check に合格する（SR-54、SR-56、SR-58、SR-59、SR-68、SR-69）。"""
+    """A-8：「既存設計書のみ」の記録が、印つきで設計書の見出しの下に入り、1,000 行を超える分は続きのファイルに入り、推測の言い回しのある表を含んでも done の後の check に合格する。一致した図と同じコードブロックは検証の対象にならず、設計書に残る（SR-54、SR-56、SR-58、SR-59、SR-68、SR-69、SR-81）。"""
     out, job, t = _match_start(tmp_path)
     record = (DISCREPANCY
               + "## 2-3 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n%s\n\n" % (t[2], t[3], SPECULATION)
@@ -497,7 +500,15 @@ def test_legacy_only_inserted(tmp_path):
               + "## 6-7 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n%s\n\n" % (t[6], t[7], "\n".join(_big(1)))
               + "## 8 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n" % (t[8], "\n".join(_big(2))))
     _write(out, job["outputs"][0], record)
-    r = _drive(out)
+    # kernel の内部設計書に、一致した図（t[4]）と、一致した図でない Mermaid の図（D_BLOCK）を書く。
+    _drive(out, until="write_module")
+    helpers.fake_agent(out)
+    kj = _part_job(out, "kernel")
+    for rel in kj["outputs"]:
+        _write(out, rel, _design({"役割": [D_ROLE], "処理の流れ": [t[4]], "状態": [D_BLOCK]}, none=NONE_BOTH) if rel == KERNEL
+               else REQ if rel.startswith("docs/requirements/") else "- なし\n")
+    # Mermaid の図は、検証に渡ると、どれも不明（消す）にする。
+    r = _drive(out, verdict=lambda e: "不明" if e["text"].startswith("```mermaid") else None)
     assert r.data["state"] == "done", r.data
     docs = Path(out) / "docs"
 
@@ -520,10 +531,14 @@ def test_legacy_only_inserted(tmp_path):
     for lines in (kernel, cont, arch):
         assert len(lines) <= 1000 and "E000" not in "\n".join(lines)
 
-    # 差し込んだ記録と決まった1文は、検証の対象にならない（SR-59）。
+    # 差し込んだ記録と決まった1文と一致した図は、検証の対象にならない（SR-59）。
     for j in helpers.jobs_with(out, kind="verify"):
         info = helpers.read_json(Path(out) / ".work" / "verify" / (j["id"] + ".json"))
-        assert all(MARK not in e["text"] and e["text"] != NONE_BOTH for e in info["lines"]), info
+        assert all(MARK not in e["text"] and e["text"] != NONE_BOTH and e["text"] != t[4] for e in info["lines"]), info
+    # 一致した図でない Mermaid の図は、今までどおり検証の対象になり、不明で消える。一致した図は設計書に残る。
+    assert D_BLOCK in [e["text"] for _, info in _verify_jobs(out, KERNEL) for e in info["lines"]]
+    body = "\n".join(kernel[:kernel.index(LEGACY_HEADING)])
+    assert t[4] in body and D_BLOCK not in body, body
     c = _check(out)
     assert c["passed"] is True and c["problem_count"] == 0, c
     assert _nav(_load_mkdocs(out), "内部設計書")[1]["モジュール"] == [
