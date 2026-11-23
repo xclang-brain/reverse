@@ -332,7 +332,7 @@
 
 1. 1.3 の順に入力を確かめる。足りないパッケージは `revdoclib.packages.missing(need_pdf)` で調べる（12章）。
 2. 計画を作る（2章）。`path_too_long` を確かめる（1.3）。
-3. `.work/state.json` がないとき：`.work/` の表の「`init`」のファイルと、最初の状態（4.7）を書く。最初の状態は、`stage` が最初の仕事の種類（`analyze` か `convert`）、`round` と `no_output` が 0、`next_job` が仕事の数 + 1、`confirmed` が `{}`、`log` が `[]` である。`jobs` には計画の仕事を順に全部入れ、`stage` と `agent` を 4.2 の表のとおり、`status` を `pending`、`tries` を 0、`reasons` と `substitute` を `[]`、`outputs` を6章のその仕事の出力の全部にする。`convert` の `pages` は、仕事の全部のページを `{"prev": [], "mermaid": false}` にする。
+3. `.work/state.json` がないとき：`.work/` の表の「`init`」のファイルと、最初の状態（4.7）を書く。最初の状態は、`stage` が最初の仕事の種類（`analyze` か `convert`）、`round` と `no_output` が 0、`next_job` が仕事の数 + 1、`confirmed` と `doubted` が `{}`、`log` が `[]` である。`jobs` には計画の仕事を順に全部入れ、`stage` と `agent` を 4.2 の表のとおり、`status` を `pending`、`tries` を 0、`reasons` と `substitute` を `[]`、`outputs` を6章のその仕事の出力の全部にする。`convert` の `pages` は、仕事の全部のページを `{"prev": [], "mermaid": false}` にする。
 4. `.work/state.json` があるとき（再開）：作った計画と `.work/plan.json` を、`excluded` を除いて、JSON の値として比べる。違えば `input_changed`。同じなら、`issued` の仕事を `pending` に戻し、`no_output` の回数を 0 にする。仕事の回数（`tries`）は変えない。
 
 「違いのあるファイル」は、2つの計画の `files` と `pdfs` で、片方にしかないパスと、`sha1` が違うパスである。
@@ -485,6 +485,7 @@ pending → issued → done
      "pages": {"3": {"prev": ["missing:タスクの状態"], "mermaid": false}}}
   ],
   "confirmed": {"docs/design/modules/kernel.md": ["5d41402a…"]},
+  "doubted": {"docs/design/modules/kernel.md": ["7b52009b…"]},
   "log": [
     {"type": "convert_diff", "pdf": "D01", "page": 4, "kind": "extra", "text": "続き"},
     {"type": "figure_switched", "pdf": "D01", "page": 7},
@@ -506,6 +507,7 @@ pending → issued → done
 | `jobs` | 全部の仕事。ID の順。`outputs` は、担当エージェントがその回に書くファイルで、検査が見るファイルである（出力先からの相対パス）。`tries` は、4.5 と 4.6 で増やした回数。`reasons` は、最後の検査の不合格の項目で、`rule`（検査の名前）、`file`、`line`（ないときは `null`）、`detail`（日本語の説明。`bad_mermaid` では 5.4 の番号で始める。例：`F3：…`）を持つ。テストは、`bad_mermaid` のほかの `detail` の中身を確かめない。`verify` の仕事の項目は、`missing_file` のほかは、`n`（番号）と `sha1`（行の SHA-1。8.5）も持つ。`substitute` は、代わりのファイルを置いたパス。 |
 | `jobs[].pages` | `convert` だけが持つ。まだ合格していないページごとに、前の回の文字列の指摘（`prev`）と、前の回に `bad_mermaid` があったか（`mermaid`）。 |
 | `confirmed` | 検証で確かめた行。設計書のファイルごとに、行の SHA-1（8.5）の配列。重なりは入れない。 |
+| `doubted` | 検証で、1回「不明」になった行。形は `confirmed` と同じ。 |
 | `log` | 不明点の一覧に載せる出来事（8.7）。 |
 
 ## 5. Markdown の読み方と、共通の検査
@@ -1198,7 +1200,7 @@ stateDiagram-v2
 3. 段階の仕事が全部 `done` か `failed` になったら、対象にする行を数え直す。
    - 0 行なら、段階を終える。
    - `round` が 3 未満なら、`round` を1増やして 1 に戻る。前の回の仕事の `reasons` は、番号の行の SHA-1（`sha1`）を持つ。新しい仕事の番号の行と SHA-1 が同じ理由を、新しい指示のファイルに書く（7.2）。
-   - `round` が 3 なら、残った行を、ファイルの上から順に1つずつ設計書から消し、`verify_unjudged` として `log` に入れて、段階を終える。
+   - `round` が 3 なら、残った行を、ファイルの上から順に1つずつ設計書から消し、`verify_unjudged` として `log` に入れて、段階を終える。SHA-1 が `doubted` にある行（3回目に、初めて不明になった行）は、`verify_unknown` として入れる。
 
 **判定の扱い**：6.6 の検査に合格した判定を、仕事の ID の順、番号の小さい順に、1つずつ使う。設計書の中の行は、番号の行と SHA-1 が同じ（`.json` の `sha1`）本文の行の全部である。見つからないときは、何もしない。
 
@@ -1206,7 +1208,9 @@ stateDiagram-v2
 | --- | --- |
 | OK、対象外 | SHA-1 を、そのファイルの `confirmed` に足す。 |
 | NG（直した文がある） | 行を、直した文に置き換える。 |
-| NG（コードブロック）、不明 | SHA-1 が同じ行を、上から順に1つずつ消す（コードブロックは、全体を消す）。`verify_unknown` として `log` に入れる。`words` は、不明では探した語、NG では空にする。 |
+| NG（コードブロック） | SHA-1 が同じ行を、上から順に1つずつ消す（コードブロックは、全体を消す）。`verify_unknown` として `log` に入れる。`words` は空にする。 |
+| 不明（1回目） | SHA-1 が、そのファイルの `doubted` にないとき。SHA-1 を `doubted` に足す。行は変えない（次の回に、別の検証担当が確かめる。SR-63）。その仕事の `reasons` に、`unknown_once` の項目（`sha1` と、説明 `前の回の検証担当は、不明とした（探した語：<語>）。ソースコードのフォルダの全体を探して、もう一度確かめる。`）を入れる。 |
+| 不明（2回目） | SHA-1 が `doubted` にあるとき。NG（コードブロック）と同じように消す。`words` は、探した語にする。 |
 
 - OK の判定を使うときに、根拠の場所が条件付きコンパイルの中にあれば、行の末尾に、条件の注を足す（下の「コンパイルの条件の注」）。注を足した行の SHA-1 も、`confirmed` に足す。
 - `## 既存の設計書にだけ書かれている内容` の見出しから後ろの行と、不明点のファイルの行は、上の表の代わりに、次のように扱う（SR-85）。どの場合も、`log` には入れない。条件の注は足さない。
