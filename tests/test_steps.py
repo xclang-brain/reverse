@@ -158,9 +158,9 @@ def _design(sections, none=NONE_SOURCE):
     return "\n".join(lines) + "\n"
 
 
-def _module_start(tmp_path, design):
+def _module_start(tmp_path, design, layout=None):
     """ソースコードだけの入力で、モジュールの執筆の仕事を渡したところまで進め、kernel の出力に design を書く。"""
-    out = _start(tmp_path, "write_module")
+    out = _start(tmp_path, "write_module", layout=layout)
     helpers.fake_agent(out)
     job = next(j for j in helpers.jobs_with(out, status="issued", kind="write_module") if j["target"] == "kernel")
     for rel in job["outputs"]:
@@ -234,6 +234,8 @@ PAGE1 = """# ２．５ タスク
 
 ## 2.5x 番号でない
 
+#### 付記
+
 本文の行である。
 
 ![図 A](figure:0.1,0.2,0.5,0.6)
@@ -246,6 +248,8 @@ PAGE1 = """# ２．５ タスク
 """
 PAGE2 = """
 
+### はじめに
+
 #### 2.6. 終了
 
 ![図 C](figure:0.2,0.2,0.8,0.4)
@@ -255,24 +259,37 @@ PAGE2 = """
 読めない文字は【判読できない】と書く。
 
 """
+PAGE3 = """## 付録
+
+#### 補足
+
+付録の本文である。
+"""
+# 番号つきでない見出しは、同じページで直前にある番号つきの見出しと同じ数だけ動く（1 〜 6 に収める）。
 ASSEMBLED = [
     "<!-- page: 1 -->", "",
     "## ２．５ タスク", "",            # NFKC で 2.5 → 数字のかたまり2つ
     "### 2.5.9 起動", "",
     "# 3. 手順", "",                   # 1. の形 → 1つ
-    "### 2 概要", "",                  # 番号の形でない見出しは変えない
+    "# 2 概要", "",                    # 直前の「3. 手順」と同じく3つ減らし、下限の 1 にする
     "###### 1.2.3.4.5.6.7 深い", "",   # 6 が上限
-    "## 2.5x 番号でない", "",
+    "###### 2.5x 番号でない", "",      # 直前の「1.2.3.4.5.6.7 深い」と同じく4つ増やす
+    "###### 付記", "",                 # 4つ増やすと 8 なので、上限の 6 にする
     "本文の行である。", "",
     "![図 A](fig/p0001-1.png)", "",
     "図の説明：箱の図である。", "",
     "![図 B](fig/p0001-2.png)", "",
     "図の説明：線の図である。", "",
     "<!-- page: 2 -->", "",
+    "# はじめに", "",                  # 直前にないので、ページの最初の番号つきの見出し（2.6.）と同じく2つ減らす
     "## 2.6. 終了", "",
     "![図 C](fig/p0002-1.png)", "",
     "図の説明：ページ 2 の図である。", "",
-    "読めない文字は【判読できない】と書く。",
+    "読めない文字は【判読できない】と書く。", "",
+    "<!-- page: 3 -->", "",
+    "## 付録", "",                     # ページに番号つきの見出しがないので、変えない
+    "#### 補足", "",
+    "付録の本文である。",
 ]
 # 図の範囲（各辺を 0.04 広げ、0 〜 1 に収めたもの）
 FIGURES = [("p0001-1.png", 1, (0.06, 0.16, 0.54, 0.64)),
@@ -286,16 +303,16 @@ def _dark_box(img):
 
 
 def test_assemble_pages_headings_figures(tmp_path):
-    """A-8、A-9：組み立てで、ページの目印が入り、番号の見出しのレベルがそろい、図が決まった範囲と大きさで切り出される（SR-39、SR-40）。"""
+    """A-8、A-9：組み立てで、ページの目印が入り、番号の見出しのレベルがそろい、ほかの見出しが同じページの番号つきの見出しと同じ数だけ動き、図が決まった範囲と大きさで切り出される（SR-39、SR-40）。"""
     import pypdfium2 as pdfium
     from PIL import Image
 
-    pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
+    pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=3)
     out = _start(tmp_path, "convert", src=False, pdf=pdf)
     job = helpers.jobs_with(out, status="issued", kind="convert")[0]
-    assert job["outputs"] == [".work/pdf/D01/0001.md", ".work/pdf/D01/0002.md"], job
-    _write(out, job["outputs"][0], PAGE1)
-    _write(out, job["outputs"][1], PAGE2)
+    assert job["outputs"] == [".work/pdf/D01/0001.md", ".work/pdf/D01/0002.md", ".work/pdf/D01/0003.md"], job
+    for rel, page in zip(job["outputs"], [PAGE1, PAGE2, PAGE3]):
+        _write(out, rel, page)
     r = helpers.revdoc("next", out)
     assert r.ok and r.data["state"] == "done", r.data
 
@@ -369,7 +386,7 @@ def test_assemble_split(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_match_split(tmp_path):
-    """A-8：照合の仕事は、docs/legacy/ の本文の行を、見出しの切れ目で 50 行までに分けたものになる（SR-41。5.6、8.2）。"""
+    """A-8：照合の仕事は、docs/legacy/ の本文の行を、見出しの切れ目で 50 行までに分けたものになり、同じ行の仕事が2つずつできる。代わりの関数は、2つ目の仕事にも出力を書く（SR-41、SR-83。5.6、8.2）。"""
     pdf = helpers.make_image_pdf(tmp_path / "pdf" / "spec.pdf", pages=2)
     out = _start(tmp_path, "convert", pdf=pdf)
     job = helpers.jobs_with(out, status="issued", kind="convert")[0]
@@ -382,12 +399,24 @@ def test_match_split(tmp_path):
     legacy = _file_lines(Path(out) / "docs" / "legacy" / "spec" / "001.md")
     jobs = helpers.jobs_with(out, kind="match")
     infos = [helpers.read_json(Path(out) / ".work" / "match" / (j["id"] + ".json")) for j in jobs]
+    # 1つ目の仕事を全部作ってから、2つ目の仕事を全部、同じ順に作る（8.2）。
+    assert len(jobs) == 10, [j["target"] for j in jobs]
+    first, second = infos[:5], infos[5:]
     # 5.6 の例と同じ：30、25、115、15 行の節は、30、25、50、50、15 + 15 行の5つの仕事になる
-    assert [i["count"] for i in infos] == [30, 25, 50, 50, 30]
+    assert [i["count"] for i in first] == [30, 25, 50, 50, 30]
     assert all(i["file"] == "docs/legacy/spec/001.md" for i in infos)
-    assert [legacy[i["lines"][0]["line"] - 1] for i in infos] == [
+    assert [legacy[i["lines"][0]["line"] - 1] for i in first] == [
         "A の本文 1 である。", "B の本文 1 である。", "C の本文 1 である。", "C の本文 51 である。", "C の本文 101 である。"]
-    assert [j["target"] for j in jobs] == ["legacy/spec/001.md:%d" % i["lines"][0]["line"] for i in infos]
+    targets = ["legacy/spec/001.md:%d" % i["lines"][0]["line"] for i in first]
+    assert [j["target"] for j in jobs] == targets + [t + "#2" for t in targets]
+    # 2つ目の仕事の番号を振った行のファイルは、1つ目と同じ中身である。
+    match = Path(out) / ".work" / "match"
+    assert second == first
+    for a, b in zip(jobs[:5], jobs[5:]):
+        assert helpers.read_text(match / (b["id"] + ".lines.md")) == helpers.read_text(match / (a["id"] + ".lines.md"))
+    # 代わりの関数は、2つ目の仕事にも出力を書き、どれも検査に合格する。
+    _drive(out, until="write_module")
+    assert [j["status"] for j in helpers.jobs_with(out, kind="match")] == ["done"] * 10
 
 
 # ---------------------------------------------------------------------------
@@ -421,59 +450,90 @@ def _part_job(out, target):
 
 
 def test_distribute_records(tmp_path):
-    """A-8：照合の記録が、部分ごと、全体、records.json に振り分けられ、「一致」の範囲の Mermaid の図がモジュールの照合の記録に載り、照合していない範囲が一覧に載る（SR-44、SR-46、SR-81）。"""
+    """A-8：照合の記録が、部分ごと、全体、records.json に振り分けられ、「一致」の範囲の Mermaid の図がモジュールの照合の記録に載り、照合していない範囲が一覧に載る。2つ目の仕事の記録からは、1つ目の「食い違い」と番号が重ならない「食い違い」だけが、1つ目の記録の間に入る（SR-44、SR-46、SR-81、SR-83）。"""
     out, job, t = _match_start(tmp_path)
+    mj = job["id"]
+    seconds = [j["id"] for j in helpers.jobs_with(out, kind="match") if j["target"] == job["target"] + "#2"]
+    assert len(seconds) == 1, [j["target"] for j in helpers.jobs_with(out, kind="match")]
+    mj2 = seconds[0]
     # 0 番があり、8 番を覆わない記録。3回とも bad_cover で失敗になり、合格する記録だけが使われる（8.3 の 1）。
     record = ("## 0 対象外\n\n" + DISCREPANCY
               + "## 2-3 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n" % (t[2], t[3])
               + "## 4 一致\n- 場所: [kernel/task.c:1-7]\n\n"
-              + "## 5 既存設計書のみ\n- モジュール: 全体\n- 内容:\n\n| 優先度 | 用途 |\n| --- | --- |\n| 0 | 割込み処理 |\n\n"
-              + "## 6-7 既存設計書のみ\n- モジュール: lib\n- 内容:\n\n%s\n\n%s\n" % (t[6], t[7]))
+              + "## 5 食い違い\n- 場所: [lib/timer.cpp:4-7]\n- 名前: Timer::method_0001\n"
+              + "- 既存の設計書: 倍率は 2 である。\n- ソースコード: 倍率は 1 である。\n\n"
+              + "## 6-7 既存設計書のみ\n- モジュール: 全体\n- 内容:\n\n%s\n\n%s\n" % (t[6], t[7]))
+    # 2つ目の仕事の記録。使うのは 3 の「食い違い」だけである。
+    # 1 は1つ目の「食い違い」と番号が重なる。4 と 6-8 は「食い違い」でない。
+    record2 = ("## 1 食い違い\n- 場所: [kernel/task.c:300-300]\n- 名前: TerminateTask\n"
+               "- 既存の設計書: 重なる記録である。\n- ソースコード: 重なる記録である。\n\n"
+               "## 2 対象外\n\n"
+               "## 3 食い違い\n- 場所: [kernel/task.c:3-3]\n- 名前: task_count\n"
+               "- 既存の設計書: 初期値は 1 である。\n- ソースコード: 初期値は 0 である。\n\n"
+               "## 4 一致\n- 場所: [kernel/task.c:1-7]\n\n"
+               "## 5 対象外\n\n"
+               + "## 6-8 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n%s\n" % (t[6], t[7], t[8]))
+    _write(out, _job(out, mj2)["outputs"][0], record2)
     for _ in range(3):
         _write(out, job["outputs"][0], record)
         r = helpers.revdoc("next", out)
         assert r.ok, r.data
-    mj = job["id"]
-    assert _job(out, mj)["status"] == "failed" and helpers.read_state(out)["stage"] == "write_module"
+    assert _job(out, mj)["status"] == "failed" and _job(out, mj2)["status"] == "done" \
+        and helpers.read_state(out)["stage"] == "write_module"
 
     work = Path(out) / ".work" / "records"
     data = helpers.read_json(work / "records.json")
-    assert data["discrepancies"] == [{"job": mj, "pdf": "D01", "page": 1, "file": "kernel/task.c",
-                                      "name": "ActivateTask", "module": "kernel",
-                                      "legacy": "上限は 1 である。", "source": "上限は 2 である。"}]
+    # 「食い違い」は、1つ目の仕事の順、範囲の最初の番号の順に並ぶ（8.3 の 1）。
+    assert data["discrepancies"] == [
+        {"job": mj, "pdf": "D01", "page": 1, "file": "kernel/task.c", "name": "ActivateTask", "module": "kernel",
+         "legacy": "上限は 1 である。", "source": "上限は 2 である。"},
+        {"job": mj2, "pdf": "D01", "page": 1, "file": "kernel/task.c", "name": "task_count", "module": "kernel",
+         "legacy": "初期値は 1 である。", "source": "初期値は 0 である。"},
+        {"job": mj, "pdf": "D01", "page": 2, "file": "lib/timer.cpp", "name": "Timer::method_0001", "module": "lib",
+         "legacy": "倍率は 2 である。", "source": "倍率は 1 である。"}]
     assert [(e["id"], e["job"], e["pdf"], e["page"], e["target"]) for e in data["legacy_only"]] == [
         ("E0001", mj, "D01", 1, "docs/design/modules/kernel.md"),
-        ("E0002", mj, "D01", 2, "docs/design/architecture.md"),
-        ("E0003", mj, "D01", 2, "docs/design/modules/lib.md")]
-    assert data["legacy_only"][0]["module"] == "kernel" and data["legacy_only"][2]["module"] == "lib"
+        ("E0002", mj, "D01", 2, "docs/design/architecture.md")]
+    assert data["legacy_only"][0]["module"] == "kernel"
     assert data["unmatched"] == [{"job": mj, "pdf": "D01", "page": 2, "file": "docs/legacy/spec/001.md", "lines": 1}]
 
     kj, lj = _part_job(out, "kernel")["id"], _part_job(out, "lib")["id"]
     kernel = _file_lines(work / (kj + ".md"))
     assert kernel[0] == "# 照合の記録（kernel）"
     assert _between(kernel, "## 食い違い", "## 一致した図") == [
-        "### kernel/task.c ActivateTask", "- 既存の設計書: 上限は 1 である。", "- ソースコード: 上限は 2 である。"]
+        "### kernel/task.c ActivateTask", "- 既存の設計書: 上限は 1 である。", "- ソースコード: 上限は 2 である。",
+        "### kernel/task.c task_count", "- 既存の設計書: 初期値は 1 である。", "- ソースコード: 初期値は 0 である。"]
     assert _between(kernel, "## 一致した図") == ["### kernel/task.c"] + t[4].split("\n")
     lib = _file_lines(work / (lj + ".md"))
     assert lib[0] == "# 照合の記録（lib）"
-    assert _between(lib, "## 食い違い", "## 一致した図") == ["なし"] and _between(lib, "## 一致した図") == ["なし"]
+    assert _between(lib, "## 食い違い", "## 一致した図") == [
+        "### lib/timer.cpp Timer::method_0001", "- 既存の設計書: 倍率は 2 である。", "- ソースコード: 倍率は 1 である。"]
+    assert _between(lib, "## 一致した図") == ["なし"]
     # 画像の行のパスは、差し込む先の設計書からの相対パスになる（8.3 の 5）。
     k_legacy = _file_lines(work / (kj + ".legacy.md"))
     assert k_legacy[0] == "# 照合の記録（kernel。既存設計書のみ）"
     assert _nonempty(k_legacy[1:]) == ["### E0001", "![ページ 1 の図](../../legacy/spec/fig/p0001-1.png)", t[3]]
     l_legacy = _file_lines(work / (lj + ".legacy.md"))
-    assert _nonempty(l_legacy[1:]) == ["### E0003", "![ページ 2 の図](../../legacy/spec/fig/p0002-1.png)", t[7]]
+    assert _nonempty(l_legacy[1:]) == ["なし"]
     overall = _file_lines(work / "overall.md")
-    assert _nonempty(overall[1:]) == ["### E0002", "| 優先度 | 用途 |", "| --- | --- |", "| 0 | 割込み処理 |"]
+    assert _nonempty(overall[1:]) == ["### E0002", "![ページ 2 の図](../legacy/spec/fig/p0002-1.png)", t[7]]
 
     r = _drive(out)
     assert r.data["state"] == "done", r.data
     disc = _file_lines(Path(out) / "docs" / "review" / "discrepancies.md")
     assert disc[0] == "# 食い違いの一覧"
-    assert [x for x in disc if x.startswith("## ")] == ["## 1. kernel/task.c ActivateTask", "## 照合していない範囲"]
+    assert [x for x in disc if x.startswith("## ")] == [
+        "## 1. kernel/task.c ActivateTask", "## 2. kernel/task.c task_count", "## 3. lib/timer.cpp Timer::method_0001",
+        "## 照合していない範囲"]
     assert _items(disc, "## 1. kernel/task.c ActivateTask") == [
         "- 既存の設計書での場所: spec.pdf p.1", "- ソースコードでの場所: kernel/task.c ActivateTask",
         "- モジュール: kernel", "- 既存の設計書の内容: 上限は 1 である。", "- ソースコードの内容: 上限は 2 である。"]
+    assert _items(disc, "## 2. kernel/task.c task_count") == [
+        "- 既存の設計書での場所: spec.pdf p.1", "- ソースコードでの場所: kernel/task.c task_count",
+        "- モジュール: kernel", "- 既存の設計書の内容: 初期値は 1 である。", "- ソースコードの内容: 初期値は 0 である。"]
+    assert _items(disc, "## 3. lib/timer.cpp Timer::method_0001") == [
+        "- 既存の設計書での場所: spec.pdf p.2", "- ソースコードでの場所: lib/timer.cpp Timer::method_0001",
+        "- モジュール: lib", "- 既存の設計書の内容: 倍率は 2 である。", "- ソースコードの内容: 倍率は 1 である。"]
     assert _items(disc, "## 照合していない範囲") == ["- spec.pdf p.2（docs/legacy/spec/001.md の 1 行）"]
     failed = _items(_file_lines(Path(out) / "docs" / "review" / "unknowns.md"), "### 失敗した仕事")
     assert len(failed) == 1 and failed[0].startswith("- 照合：docs/legacy/spec/001.md の ") \
@@ -621,6 +681,125 @@ def test_rewritten_line_is_verified_again(tmp_path):
     assert [[e["text"] for e in info["lines"]] for _, info in jobs] == [[D_ROLE, D_IFACE], [new]]
     assert new in _file_lines(path)
     assert jobs[1][1]["lines"][0]["sha1"] in helpers.read_state(out)["confirmed"][KERNEL]
+
+
+# 条件付きコンパイルのあるソースファイル（行番号は、各行の右の注釈のとおり）
+COND_C = "".join(line + "\n" for line in [
+    "/* kernel/cond.c */",                          # 1
+    "int valve_open(void);",                        # 2
+    "#ifdef USE_DRAIN",                             # 3
+    "int valve_drain(void) { return 1; }",          # 4
+    "  #if LEVEL >  2   /* deep */",                # 5
+    "int valve_deep(void) { return 2; }",           # 6
+    "#endif",                                       # 7
+    "#else",                                        # 8
+    "int valve_hold(void) { return 0; }",           # 9
+    "#endif",                                       # 10
+    "#if defined(USE_FAST)",                        # 11
+    "int valve_fast(void) { return 3; }",           # 12
+    "#elif defined(USE_SLOW)",                      # 13
+    "int valve_slow(void) { return 4; }",           # 14
+    "#endif",                                       # 15
+    "int valve_close(void) { return 5; }",          # 16
+    "#ifdef USE_LOG",                               # 17
+    "int valve_log(void) { return 6; }",            # 18
+    "#endif",                                       # 19
+])
+COND_H = "".join(line + "\n" for line in [
+    "/* kernel/cond.h */",                          # 1
+    "#ifndef COND_H",                               # 2
+    "",                                             # 3
+    "#define COND_H",                               # 4
+    "int valve_guard(void);",                       # 5
+    "#ifdef USE_EXTRA",                             # 6
+    "int valve_extra(void);",                       # 7
+    "#endif",                                       # 8
+    "#endif",                                       # 9
+])
+SPACE_H = "".join(line + "\n" for line in [  # # と語の間に空白のある条件の行
+    "/* kernel/space.h */",                         # 1
+    "# ifndef SPACE_H",                             # 2
+    "# define SPACE_H",                             # 3
+    "int valve_space(void);",                       # 4
+    "# ifdef USE_WIDE",                             # 5
+    "int valve_wide(void);",                        # 6
+    "# else",                                       # 7
+    "int valve_narrow(void);",                      # 8
+    "# endif",                                      # 9
+    "# endif",                                      # 10
+])
+BOOT_S = "/* kernel/boot.S */\n#ifdef USE_BOOT\nboot_entry:\n#endif\n"
+COND_LAYOUT = dict(LAYOUT, **{"kernel/cond.c": COND_C, "kernel/cond.h": COND_H, "kernel/space.h": SPACE_H,
+                              "kernel/boot.S": BOOT_S})
+COND_ROW = "| `valve_drain` | `1` |"
+COND_BLOCK = "```c\nint valve_drain(void) { return 1; }\n```"
+DRAIN = "（コンパイルの条件：`#ifdef USE_DRAIN`）"
+
+COND_CASES = [
+    pytest.param("- `valve_drain` は、`1` を返す。", "[kernel/cond.c:4-4]",
+                 "- `valve_drain` は、`1` を返す。" + DRAIN, id="inside"),
+    pytest.param("- `valve_close` は、`5` を返す。", "[kernel/cond.c:16-16]",
+                 "- `valve_close` は、`5` を返す。", id="outside"),
+    pytest.param("- `valve_drain` と `valve_open` を書く。", "[kernel/cond.c:2-4]",
+                 "- `valve_drain` と `valve_open` を書く。", id="range_starts_outside"),
+    pytest.param("- `USE_DRAIN` のとき、`valve_drain` は `1` を返す。", "[kernel/cond.c:3-7]",
+                 "- `USE_DRAIN` のとき、`valve_drain` は `1` を返す。", id="range_on_condition_lines_and_name_in_line"),
+    pytest.param("- `valve_guard` を宣言する。", "[kernel/cond.h:5-5]",
+                 "- `valve_guard` を宣言する。", id="include_guard"),
+    pytest.param("- `valve_extra` を宣言する。", "[kernel/cond.h:7-7]",
+                 "- `valve_extra` を宣言する。（コンパイルの条件：`#ifdef USE_EXTRA`）", id="inside_include_guard"),
+    pytest.param("- `valve_deep` は、`2` を返す。", "[kernel/cond.c:6-6]",
+                 "- `valve_deep` は、`2` を返す。（コンパイルの条件：`#ifdef USE_DRAIN`、`#if LEVEL > 2`）",
+                 id="nested"),
+    pytest.param("- `valve_hold` は、`0` を返す。", "[kernel/cond.c:9-9]",
+                 "- `valve_hold` は、`0` を返す。（コンパイルの条件：`#ifdef USE_DRAIN` の `#else`）", id="after_else"),
+    pytest.param("- `valve_slow` は、`4` を返す。", "[kernel/cond.c:14-14]",
+                 "- `valve_slow` は、`4` を返す。（コンパイルの条件：`#elif defined(USE_SLOW)`）", id="after_elif"),
+    pytest.param("- `USE_DRAIN` のとき、`valve_deep` は `2` を返す。", "[kernel/cond.c:6-6]",
+                 "- `USE_DRAIN` のとき、`valve_deep` は `2` を返す。（コンパイルの条件：`#if LEVEL > 2`）",
+                 id="name_of_outer_in_line"),
+    pytest.param("- `valve_drain` と `valve_log` を書く。", "[kernel/cond.c:4-4] [kernel/cond.c:18-18]",
+                 "- `valve_drain` と `valve_log` を書く。" + DRAIN, id="all_locations_inside"),
+    pytest.param("- `valve_drain` と `valve_close` を書く。", "[kernel/cond.c:4-4] [kernel/cond.c:16-16]",
+                 "- `valve_drain` と `valve_close` を書く。", id="one_location_outside"),
+    pytest.param("- `valve_space` を宣言する。", "[kernel/space.h:4-4]",
+                 "- `valve_space` を宣言する。", id="include_guard_with_spaces"),
+    pytest.param("- `valve_narrow` を宣言する。", "[kernel/space.h:8-8]",
+                 "- `valve_narrow` を宣言する。（コンパイルの条件：`# ifdef USE_WIDE` の `#else`）",
+                 id="after_else_with_spaces"),
+    pytest.param(COND_ROW, "[kernel/cond.c:4-4]", "| `valve_drain` | `1`" + DRAIN + " |", id="table_row"),
+    pytest.param("| `valve_drain` | `1`", "[kernel/cond.c:4-4]", "| `valve_drain` | `1`" + DRAIN,
+                 id="table_row_without_last_bar"),
+    pytest.param(COND_BLOCK, "[kernel/cond.c:4-4]", COND_BLOCK, id="code_block"),
+    pytest.param("- `boot_entry` を定義する。", "[kernel/boot.S:3-3]", "- `boot_entry` を定義する。",
+                 id="other_extension"),
+]
+
+
+def _cells(line):
+    """表の行は、セルの前後の空白を除いた形にする（ほかの行は変えない）。"""
+    return re.sub(r"\s*\|\s*", "|", line) if line.startswith("|") else line
+
+
+@pytest.mark.parametrize("text,locations,expected", COND_CASES)
+def test_compile_condition_note(tmp_path, text, locations, expected):
+    """A-8：OK の判定の根拠の場所が条件付きコンパイルの中にある行には、行の末尾にコンパイルの条件の注が付き、注を付けた行は次の回の検証の仕事にならない（SR-84。8.5）。"""
+    table = text.startswith("|")
+    body = ["| 名前 | 値 |", "| --- | --- |", text] if table else text.split("\n")
+    out = _module_start(tmp_path, _design({"役割": body}), layout=COND_LAYOUT)
+    _drive(out, until="verify_module")
+    (job, info), = _verify_jobs(out, KERNEL)
+    assert [e["text"] for e in info["lines"]] == [text], info
+    _write(out, job["outputs"][0], "[1] OK %s\n" % locations)
+    helpers.fake_agent(out, skip=[job["id"]])
+    _drive(out, until="write_overall")
+
+    lines = _file_lines(Path(out) / KERNEL)
+    got = _items(lines, "## 役割")
+    want = (["| 名前 | 値 |", "| --- | --- |", expected] if table else expected.split("\n"))
+    assert [_cells(x) for x in got] == [_cells(x) for x in want], got
+    # 注を足した行は confirmed に入り、次の回の検証の仕事にならない。
+    assert len(_verify_jobs(out, KERNEL)) == 1, [i["lines"] for _, i in _verify_jobs(out, KERNEL)]
 
 
 def test_unjudged_lines_removed_after_round_3(tmp_path):
@@ -868,10 +1047,14 @@ def test_review_lists_split(tmp_path):
     job = helpers.jobs_with(out, status="issued", kind="convert")[0]
     _write(out, job["outputs"][0], "\n".join(_body("A", 150)) + "\n")
     assert helpers.revdoc("next", out).ok and helpers.read_state(out)["stage"] == "match"
-    for j in helpers.jobs_with(out, status="issued", kind="match"):  # 全部の行を「食い違い」にする（150 件）
-        count = helpers.read_json(Path(out) / ".work" / "match" / (j["id"] + ".json"))["count"]
-        _write(out, j["outputs"][0], "".join(DISCREPANCY.replace("## 1 ", "## %d " % n, 1) for n in range(1, count + 1)))
-    assert helpers.revdoc("next", out).ok and helpers.read_state(out)["stage"] == "write_module"
+    while helpers.read_state(out)["stage"] == "match":
+        # 渡された照合の仕事（同じ行の2つ目の仕事も）に、全部の行を「食い違い」にした記録を書く
+        for j in helpers.jobs_with(out, status="issued", kind="match"):
+            count = helpers.read_json(Path(out) / ".work" / "match" / (j["id"] + ".json"))["count"]
+            _write(out, j["outputs"][0],
+                   "".join(DISCREPANCY.replace("## 1 ", "## %d " % n, 1) for n in range(1, count + 1)))
+        assert helpers.revdoc("next", out).ok
+    assert helpers.read_state(out)["stage"] == "write_module"
     helpers.fake_agent(out)
     written = ["- `ActivateTask` の不明点 %d。" % k for k in range(1, 1101)]
     _write(out, next(rel for rel in _part_job(out, "kernel")["outputs"] if rel.startswith(".work/unknowns/")),

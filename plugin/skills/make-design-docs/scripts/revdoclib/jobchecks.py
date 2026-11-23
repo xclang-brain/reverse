@@ -519,7 +519,7 @@ def check_write(ctx, job):
 def check_verify(ctx, job):
     """判定の記録を、番号ごとに検査する。(番号を振った行の JSON, 合格した判定, 不合格の項目) を返す。
 
-    合格した判定は、番号の順の (SHA-1, 判定, 直した文か None, 探した語)。
+    合格した判定は、番号の順の (SHA-1, 判定, 直した文か None, 探した語, 根拠の場所のリスト)。
     """
     rel = job["outputs"][0]
     info = files.read_json(ctx.abs(rel[:-3] + ".json"))
@@ -564,12 +564,12 @@ def _judge(ctx, t, rest):
     if rest == " 対象外":
         if block or markdown.code_spans(t):
             return [("bad_verdict", "コードスパンのある行とコードブロックは、OK、NG、不明のどれかにする。")], None
-        return [], ("対象外", None, "")
+        return [], ("対象外", None, "", [])
     if rest.startswith(" 不明"):
         words = rest[len(" 不明 "):].strip() if rest.startswith(" 不明 ") else ""
         if not words:
             return [("bad_verdict", "不明には、探した語を書く。")], None
-        return [], ("不明", None, words)
+        return [], ("不明", None, words, [])
     m = re.match(r" (OK|NG) ", rest)
     locs, pos = _locations(rest, m.end()) if m else ([], 0)
     tail = rest[pos:]
@@ -585,13 +585,13 @@ def _judge(ctx, t, rest):
     if problems:
         return problems, None
     if block:
-        return [], (kind, None, "")  # コードブロックは、語を調べず、NG では直した文を使わない（8.5）
+        return [], (kind, None, "", locs)  # コードブロックは、語を調べず、NG では直した文を使わない（8.5）
     problems = ctx.sources.word_problems(locs, t if kind == "OK" else fixed)
     if kind == "NG":
         if not _same_shape(t, fixed):
             problems.append(("bad_shape", "直した文の形（表の行、要求の行、箇条書き、段落）を、元の行と同じにする。"))
         problems += markdown.sentence_problems(fixed)
-    return problems, (kind, fixed, "")
+    return problems, (kind, fixed, "", locs)
 
 
 def _same_shape(t, c):

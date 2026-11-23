@@ -145,9 +145,15 @@ LEGACY_PART_LINES = 998
 MAX_HEADING_LEVEL = 6
 MARKER_LEVEL = 7
 
+# 8.2 照合の仕事を、同じ行について作る数
+MATCH_COUNT = 2
+
 # 8.4「既存設計書のみ」の記録の差し込み
 MARK_BEFORE = {"table": "【既存設計書のみ】次の表は、既存の設計書の内容である。",
                "figure": "【既存設計書のみ】次の図は、既存の設計書の内容である。"}
+
+# 8.5 コンパイルの条件の注を調べる、根拠のファイルの拡張子（小文字）
+CONDITION_EXTENSIONS = ("c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx", "inl")
 
 # 8.6 要約
 DIGEST_DEPS = 10

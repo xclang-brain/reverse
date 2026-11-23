@@ -11,6 +11,11 @@ from . import pdf as pdfmod
 PAGE_MARK = re.compile(r"<!-- page: ([0-9]+) -->")
 _NUMBERED = (re.compile(r"[0-9]+(\.[0-9]+)+\.?(\s|$)"), re.compile(r"[0-9]+\.(\s|$)"))
 _FIG_PATH = re.compile(r"\]\((fig/[^)\s]*)\)")
+_DIRECTIVE = re.compile(r"\s*#\s*(ifdef|ifndef|if|elif|else|endif)\b")
+_IFNDEF = re.compile(r"\s*#\s*ifndef\s+(\w+)")
+_DEFINE = re.compile(r"\s*#\s*define\s+(\w+)")
+_COMMENT = re.compile(r"/\*.*?(\*/|$)|//.*")
+_COND_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 # ---------------------------------------------------------------------------
@@ -25,16 +30,27 @@ def _strip_blank(lines):
     return lines
 
 
-def _relevel(line):
-    """番号の見出しの # の数を、数字のかたまりの個数にする。"""
-    level = markdown.heading_level(line)
-    text = line[level:].lstrip()
+def _numbered_level(line):
+    """番号の見出しなら、数字のかたまりの個数（6 が上限）。ほかの見出しは None。"""
+    text = unicodedata.normalize("NFKC", line[markdown.heading_level(line):].lstrip())
     for pattern in _NUMBERED:
-        m = pattern.match(unicodedata.normalize("NFKC", text))
+        m = pattern.match(text)
         if m:
-            n = min(len(re.findall(r"[0-9]+", m.group(0))), values.MAX_HEADING_LEVEL)
-            return "#" * n + " " + text
-    return line
+            return min(len(re.findall(r"[0-9]+", m.group(0))), values.MAX_HEADING_LEVEL)
+    return None
+
+
+def _relevel(body):
+    """1ページの見出しのレベルを直す（8.1 の 2）。ほかの見出しは、直前の番号の見出しと同じ数だけ動かす。"""
+    heads = [(e, _numbered_level(body[e.start])) for e in markdown.parse(body) if e.kind == "heading"]
+    shift = next((n - e.level for e, n in heads if n is not None), None)
+    if shift is None:
+        return
+    for e, n in heads:
+        if n is not None:
+            shift = n - e.level
+        level = n or min(max(e.level + shift, 1), values.MAX_HEADING_LEVEL)
+        body[e.start] = "#" * level + " " + body[e.start][e.level:].lstrip()
 
 
 def _page_lines(ctx, pdf, n, crops):
@@ -48,6 +64,7 @@ def _page_lines(ctx, pdf, n, crops):
             name = "p%04d-%d.png" % (n, k)
             body[i] = "![%s](fig/%s)" % (title, name)
             crops.append((n, jobchecks.padded(box), ctx.abs("docs/legacy/%s/fig/%s" % (pdf["folder"], name))))
+    _relevel(body)
     return ["<!-- page: %d -->" % n, ""] + body + [""]
 
 
@@ -94,10 +111,6 @@ def assemble(ctx):
             block = _page_lines(ctx, pdf, n, crops)
             lines += block
             pages_of += [n] * len(block)
-        elems = markdown.parse(lines)
-        for e in elems:
-            if e.kind == "heading":
-                lines[e.start] = _relevel(lines[e.start])
         while lines and not lines[-1].strip():
             lines.pop()
         for k, part in enumerate(split_legacy(lines, pages_of), 1):
@@ -110,17 +123,19 @@ def assemble(ctx):
 # 8.2 照合の仕事を作る、8.5 の検証の仕事を作る
 # ---------------------------------------------------------------------------
 
-def _add_job(ctx, kind, rel, chunk):
-    """仕事を状態の最後に足す。target は <docs/ からのパス>:<最初の番号の行の行番号>。"""
+def _add_job(ctx, kind, rel, chunk, suffix=""):
+    """仕事を状態の最後に足す。target は <docs/ からのパス>:<最初の番号の行の行番号><suffix>。"""
     st = ctx.state
     job = init.job_entry({"id": "J%05d" % st["next_job"], "kind": kind,
-                          "target": "%s:%d" % (rel[len("docs/"):], chunk[0].start + 1)}, st["stage"])
+                          "target": "%s:%d%s" % (rel[len("docs/"):], chunk[0].start + 1, suffix)}, st["stage"])
     st["next_job"] += 1
     st["jobs"].append(job)
     return job["id"]
 
 
 def make_match_jobs(ctx):
+    """同じ行の仕事を MATCH_COUNT 個ずつ作る。1つ目の仕事を全部作ってから、2つ目からの仕事を同じ順に作る（SR-83）。"""
+    chunks = []
     for pdf in ctx.plan["pdfs"]:
         folder = "docs/legacy/" + pdf["folder"]
         for name in sorted(n for n in os.listdir(ctx.abs(folder)) if n.endswith(".md")):
@@ -133,10 +148,13 @@ def make_match_jobs(ctx):
                 page = int(m.group(1)) if m else page
                 pages[e.start] = page
             body = {e for e in elems if e.kind in markdown.BODY}
-            for chunk in markdown.split_numbered(elems, body, values.NUMBERED_LINES):
-                job_id = _add_job(ctx, "match", rel, chunk)
-                markdown.write_numbered(ctx.out, ".work/match", job_id, rel, lines, elems, chunk,
-                                        lambda e: {"page": pages[e.start]})
+            chunks += [(rel, lines, elems, chunk, pages)
+                       for chunk in markdown.split_numbered(elems, body, values.NUMBERED_LINES)]
+    for k in range(1, values.MATCH_COUNT + 1):
+        for rel, lines, elems, chunk, pages in chunks:
+            job_id = _add_job(ctx, "match", rel, chunk, "#%d" % k if k > 1 else "")
+            markdown.write_numbered(ctx.out, ".work/match", job_id, rel, lines, elems, chunk,
+                                    lambda e, pages=pages: {"page": pages[e.start]})
 
 
 # ---------------------------------------------------------------------------
@@ -174,35 +192,51 @@ def _legacy_file(title, recs):
     return lines if recs else lines + ["なし"]
 
 
+def _usable(ctx, job, info, taken, cats):
+    """仕事の記録のうち、使うもの（8.3 の 1）。taken は使った番号で、使った記録の番号を足す。"""
+    rel = job["outputs"][0]
+    found = []
+    for rec in jobchecks.read_records(ctx, rel, info)[1] if os.path.isfile(ctx.abs(rel)) else []:
+        numbers = set(range(rec["start"], rec["end"] + 1)) if rec["start"] is not None else set()
+        if (numbers and not rec["problems"] and rec["start"] >= 1 and rec["end"] <= info["count"]
+                and not numbers & taken and rec["cat"] in cats):
+            taken |= numbers
+            found.append(rec)
+    return found
+
+
 def distribute(ctx):
     plan, st = ctx.plan, ctx.state
     found = {"discrepancies": [], "legacy_only": [], "unmatched": []}
     parts = {}  # 部分の名前 → (食い違いの項目, 一致した図の項目)
-    for job in (j for j in st["jobs"] if j["kind"] == "match"):
+    jobs = [j for j in st["jobs"] if j["kind"] == "match"]
+    n_lines = len(jobs) // values.MATCH_COUNT  # 1つ目の仕事の数。k 番目の仕事は、その数ずつ後ろにある（8.2）。
+    for i, job in enumerate(jobs[:n_lines]):
         info = files.read_json(ctx.abs(".work/match/%s.json" % job["id"]))
         pdf = next(p["id"] for p in plan["pdfs"] if info["file"].startswith("docs/legacy/%s/" % p["folder"]))
         rows = {e["n"]: e for e in info["lines"]}
-        records = jobchecks.read_records(ctx, job["outputs"][0], info)[1] if os.path.isfile(
-            ctx.abs(job["outputs"][0])) else []
         used = set()
+        records = _usable(ctx, job, info, used, jobchecks.RECORD_KEYS)
+        disc = [(job, r) for r in records if r["cat"] == "食い違い"]
+        taken = {n for _, r in disc for n in range(r["start"], r["end"] + 1)}
+        for other in jobs[n_lines + i::n_lines]:
+            disc += [(other, r) for r in _usable(ctx, other, info, taken, ("食い違い",))]
+        for owner, rec in sorted(disc, key=lambda x: x[1]["start"]):
+            path, v = rec["location"][0], rec["values"]
+            module, part = _part_of(plan, path)
+            found["discrepancies"].append({"job": owner["id"], "pdf": pdf, "page": rows[rec["start"]]["page"],
+                                           "file": path, "name": v["名前"], "module": module,
+                                           "legacy": v["既存の設計書"], "source": v["ソースコード"]})
+            parts.setdefault(part, ([], []))[0].append(["### %s %s" % (path, v["名前"]),
+                                                        "- 既存の設計書: " + v["既存の設計書"],
+                                                        "- ソースコード: " + v["ソースコード"]])
         for rec in records:
-            numbers = set(range(rec["start"], rec["end"] + 1)) if rec["start"] is not None else set()
-            if not numbers or rec["problems"] or rec["start"] < 1 or rec["end"] > info["count"] or numbers & used:
-                continue
-            used |= numbers
-            base = {"job": job["id"], "pdf": pdf, "page": rows[rec["start"]]["page"]}
+            numbers = range(rec["start"], rec["end"] + 1)
             v = rec["values"]
-            if rec["cat"] in ("一致", "食い違い"):
+            if rec["cat"] == "一致":
                 path = rec["location"][0]
-                module, part = _part_of(plan, path)
-                entry = parts.setdefault(part, ([], []))
-            if rec["cat"] == "食い違い":
-                found["discrepancies"].append(dict(base, file=path, name=v["名前"], module=module,
-                                                   legacy=v["既存の設計書"], source=v["ソースコード"]))
-                entry[0].append(["### %s %s" % (path, v["名前"]), "- 既存の設計書: " + v["既存の設計書"],
-                                 "- ソースコード: " + v["ソースコード"]])
-            elif rec["cat"] == "一致":
-                for n in sorted(numbers):
+                entry = parts.setdefault(_part_of(plan, path)[1], ([], []))
+                for n in numbers:
                     block = rows[n]["text"].split("\n")
                     if block[0].strip().startswith("```mermaid") and not markdown.mermaid_problems(
                             block, markdown.parse(block)):
@@ -212,8 +246,9 @@ def distribute(ctx):
                 target = ("docs/design/architecture.md" if module == jobchecks.OVERALL else
                           _design_path(next(m["parts"][0]["name"] for m in plan["modules"] if m["name"] == module)))
                 content = _strip_blank([_relink(x, info["file"], target) for x in rec["content"]])
-                found["legacy_only"].append(dict(base, id="E%04d" % (len(found["legacy_only"]) + 1), module=module,
-                                                 target=target, content="\n".join(content)))
+                found["legacy_only"].append({"job": job["id"], "pdf": pdf, "page": rows[rec["start"]]["page"],
+                                             "id": "E%04d" % (len(found["legacy_only"]) + 1), "module": module,
+                                             "target": target, "content": "\n".join(content)})
         rest = [n for n in sorted(rows) if n not in used]
         for k, n in enumerate(rest):
             if k == 0 or rest[k - 1] != n - 1:
@@ -411,7 +446,7 @@ def _delete(lines, sha, none):
 
 
 def _rewrite(ctx, edits, log_type):
-    """設計書を直す。edits は {ファイル: [(操作, SHA-1, 直した文, 探した語)]}。
+    """設計書を直す。edits は {ファイル: [(操作, SHA-1, 直した文, 探した語)]}。操作は replace、note、delete。
 
     途中で止まっても、やり直すと同じ結果になるように、消す行の記録を先に保存してから設計書を書き換える。
     """
@@ -420,10 +455,14 @@ def _rewrite(ctx, edits, log_type):
     for rel, ops in edits.items():
         lines = jobchecks.read_lines(ctx.abs(rel))
         for op, sha, fixed, words in ops:
-            if op == "replace":
-                for e, _, s in line_hashes(lines, markdown.parse(lines)):
-                    if s == sha:
-                        lines[e.start] = fixed
+            if op in ("replace", "note"):
+                hits = [e.start for e, _, s in line_hashes(lines, markdown.parse(lines)) if s == sha]
+                for k in hits:
+                    lines[k] = fixed
+                if op == "note":  # 注を足した行は、確かめた行である
+                    known = st["confirmed"].setdefault(rel, [])
+                    known += [s for e, _, s in line_hashes(lines, markdown.parse(lines))
+                              if e.start in hits and s not in known]
                 continue
             lines, removed = _delete(lines, sha, ctx.plan["none_sentence"])
             for heading, text in removed:
@@ -438,15 +477,89 @@ def _rewrite(ctx, edits, log_type):
         files.write_atomic(ctx.abs(rel), "".join(x + "\n" for x in lines))
 
 
+def _directive_text(line):
+    """条件の行の # から後ろ。コメントと前後の空白を除き、空白の続きを1つにする。"""
+    return " ".join(_COMMENT.sub(" ", line).split())
+
+
+def _condition_words(text):
+    """条件の式の語（defined を除く）。"""
+    return set(_COND_WORD.findall(text[_DIRECTIVE.match(text).end():])) - {"defined"}
+
+
+def _is_guard(lines, k, text):
+    """k 行目（0 から数える）の条件の行が、インクルードガード（#ifndef の次の空でない行が #define で始まる）か。"""
+    head = _IFNDEF.match(text)
+    nxt = _DEFINE.match(next((x for x in lines[k + 1:] if x.strip()), ""))
+    return bool(head and nxt and nxt.group(1) == head.group(1))
+
+
+def _conditions(lines):
+    """インクルードガードを除いた条件の (始まりの行, #endif の行, 始まりの文, [(#elif か #else の行, 文)])。行は 1 から数える。"""
+    found, stack = [], []
+    for k, line in enumerate(lines):
+        m = _DIRECTIVE.match(line)
+        if not m:
+            continue
+        text = _directive_text(line)
+        if m.group(1) in ("if", "ifdef", "ifndef"):
+            stack.append((k + 1, text, [], _is_guard(lines, k, text)))
+        elif stack and m.group(1) == "endif":
+            start, head, branches, guard = stack.pop()
+            if not guard:
+                found.append((start, k + 1, head, branches))
+        elif stack:
+            stack[-1][2].append((k + 1, text))
+    return found
+
+
+def _with_condition(ctx, t, locs):
+    """根拠の場所が条件付きコンパイルの中にあるときは、条件の注を足した行を返す（8.5 のコンパイルの条件の注）。"""
+    if markdown.FENCE.match(t):
+        return None
+    enclosing = []
+    for rel, start, end in locs:
+        if posixpath.splitext(rel)[1][1:].lower() not in values.CONDITION_EXTENSIONS:
+            return None
+        found = sorted(c for c in _conditions(ctx.sources.lines(rel)) if c[0] <= start and c[1] >= end)
+        if not found:
+            return None
+        enclosing.append((start, found))
+    start, found = enclosing[0]
+    spans = {w for x in markdown.code_spans(t) for w in markdown.WORD.findall(x)}
+    notes = []
+    for _, _, head, branches in found:
+        branch = next((b for k, b in reversed(branches) if k < start), None)
+        if branch is None:
+            note, words = "`%s`" % head, _condition_words(head)
+        elif _DIRECTIVE.match(branch).group(1) == "else":
+            note, words = "`%s` の `#else`" % head, _condition_words(head)
+        else:
+            note, words = "`%s`" % branch, _condition_words(branch)
+        if not words & spans:
+            notes.append(note)
+    if not notes:
+        return None
+    note = "（コンパイルの条件：%s）" % "、".join(notes)
+    s = t.rstrip()
+    if s.startswith("|"):  # 表の行。末尾の | があれば、その前に足す。
+        return s[:-1].rstrip() + note + " |" if s.endswith("|") else s + note
+    return t + note
+
+
 def apply_verdicts(ctx, jobs):
     """判定の記録を調べ、判定のとおりに設計書を直し、仕事を done にする（8.5 の判定の扱い）。"""
     st = ctx.state
     results = [(job,) + jobchecks.check_verify(ctx, job) for job in jobs]
     edits, confirm = {}, {}
     for job, info, verdicts, _ in results:
-        for sha, kind, fixed, words in verdicts:
+        texts = {e["sha1"]: e["text"] for e in info["lines"]}
+        for sha, kind, fixed, words, locs in verdicts:
             if kind in ("OK", "対象外"):
                 confirm.setdefault(info["file"], []).append(sha)
+                noted = _with_condition(ctx, texts[sha], locs) if kind == "OK" else None
+                if noted:
+                    edits.setdefault(info["file"], []).append(("note", sha, noted, ""))
             else:
                 op = "replace" if fixed is not None else "delete"
                 edits.setdefault(info["file"], []).append((op, sha, fixed, words))
