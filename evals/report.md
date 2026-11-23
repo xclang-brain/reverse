@@ -34,6 +34,7 @@
 | 小さい材料 7回目 | a4c0fba | 8 / 12 | C-2、C-8、C-9、C-10 |
 | 小さい材料 8回目 | 50f4ee1 | 11 / 12 | C-15 |
 | 小さい材料 9回目 | 73b319b | 11 / 12 | C-8 |
+| 小さい材料 10回目 | 86ff0f5 | 12 / 12 | なし |
 
 ## 回ごとの結果
 
@@ -373,3 +374,36 @@
 記録した数：next: 31、jobs_by_stage: {"analyze": 7, "convert": 3, "write_module": 3, "write_overall": 12, "match": 12, "verify_module": 33, "verify_overall": 25}、verify_rounds: {"verify_module": {"1": 5, "2": 16, "3": 4, "4": 2, "5": 2, "6": 1, "7": 2, "8": 1}, "verify_overall": {"1": 14, "2": 1, "3": 6, "4": 4}}、max_context: 110000、compactions: 0、elapsed_sec: 2649、next_max_sec: 2.0、largest_match_record: 233、next_per_million_lines: 2599、none_sentence_sections: 5、figure_switched: 0、verify_removed: 7
 
 この回の後に直したこと：不明の判定は、別の検証担当がもう一度確かめ、2回続いたときに行を消す。
+
+### 小さい材料 10回目
+
+- `plugin/` のコミット：86ff0f5970eda74309c37961b373252585f46563
+- モデル：claude-sonnet-5-5（記録にあったモデル：claude-sonnet-5-5。独立したエージェント：claude-opus-5-5）
+- Claude Code：2.1.330 (Claude Code)
+- 実行：2 回（1：api_error、2：finished）。かかった時間 3681 秒
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-1 | done: true、check: true、problems: 0、failed: {"解析": "0/7", "変換": "0/3", "執筆（モジュール）": "0/3", "執筆（全体）": "0/12", "照合": "0/12", "検証": "0/56"}、questions: 0、denials: 0、hook_blocked: 0、early_next: 0、reply: true、restarts: {"api_error": 1}、models: ["claude-sonnet-5-5"] | 合格 |
+| C-2 | lines: 30、facts: 30、correct: 27、no_basis: 1、not_fact: 0、empty_kinds: []、fr_three_yes: "10/10"、tries: 1 | 合格 |
+| C-4 | extern: "54/54"、removed: "3/1329"、missing: [] | 合格 |
+| C-6 | items: 9、complete: 9、sampled: "9/9" | 合格 |
+| C-7 | marked: "10/10"、rows: 99、unverifiable: "9/10" | 合格 |
+| C-8 | rows: 13、not_found: "9/10" | 合格 |
+| C-9 | ok_pages: "10/10" | 合格 |
+| C-10 | pages: "24/24"、mermaid_failed: "0/10"、blocked: 0、words: 3、search: {"モジュール": 5, "ソフトウェアカウンタ": 4, "最大数": 11} | 合格 |
+| C-11 | all: "35338/37050" | 合格 |
+| C-15 | input_changed: 0、plugin_changed: 0、new_files: []、main_file_tools: 0、names_in_plugin: []、agent_tools: []、agents_without_log: 0 | 合格 |
+
+#### 既知の変更に頼る条件
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-3 | wrong: "5/5"、tries: 1 | 合格 |
+| C-5 | listed: "8/10"、candidates: 173、writes_before: 0 | 合格 |
+
+正解：変えた場所 10 か所（`<`→`<=`、`RUNNING`→`READY`、`UINT_C(0)`→`UINT_C(1)`、`>=`→`>`、`0U`→`1U`、`<`→`<=`、`<=`→`<`、`0U`→`1U`、`maxval + 1U`→`maxval`、`0U`→`1U`）、誤りの文 5 件、既存の設計書にしかない記述 10 件
+
+記録した数：next: 30、jobs_by_stage: {"analyze": 7, "convert": 3, "write_module": 3, "write_overall": 12, "match": 12, "verify_module": 35, "verify_overall": 21}、verify_rounds: {"verify_module": {"1": 4, "2": 16, "3": 6, "4": 2, "5": 2, "6": 2, "7": 2, "8": 1}, "verify_overall": {"1": 13, "2": 1, "3": 4, "4": 3}}、max_context: 89349、compactions: 0、elapsed_sec: 3681、next_max_sec: 1.9、largest_match_record: 233、next_per_million_lines: 2515、none_sentence_sections: 8、figure_switched: 0、verify_removed: 3
+
+この回の後に直したこと：なし（12 の条件が全部合格。途中で、API の認証エラーで1回止まり、続きから呼び直した）
