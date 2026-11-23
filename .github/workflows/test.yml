@@ -1,0 +1,25 @@
+# スクリプトの自動テスト（A）を、Windows と Linux、Python 3.9 と最新の安定バージョンで動かす（要件の文書の 5.1 の D）。
+# 読み込みのテスト（B、tests/loading/）は、claude と copilot がないので動かさない。
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ["3.9", "3.x"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: パッケージを入れる
+        run: python -m pip install "pypdfium2>=5" Pillow mkdocs-material pytest
+      - name: テストを動かす
+        run: python -m pytest -q --ignore=tests/loading
