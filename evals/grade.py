@@ -685,10 +685,10 @@ def c8(run):
 
 
 def convert_rules():
-    """変換の決まり（SR-26 〜 SR-31）の文を、要件の文書から取る。"""
+    """変換の決まり（SR-26 〜 SR-31）と、図の行を画像の参照に置き換える決まり（SR-40）の文を、要件の文書から取る。"""
     text = read_text(REPO / "docs" / "requirements" / "specification.md")
-    return "\n".join("- " + line.split("|")[2].strip() for line in text.splitlines()
-                     if re.match(r"\| SR-(2[6-9]|3[01]) \|", line))
+    return "\n".join("- " + re.split(r"(?<!\\)\|", line)[2].strip().replace("\\|", "|") for line in text.splitlines()
+                     if re.match(r"\| SR-(2[6-9]|3[01]|40) \|", line))
 
 
 def c9(run):
