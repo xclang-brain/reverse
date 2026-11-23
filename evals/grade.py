@@ -266,6 +266,7 @@ class Run:
              "models": set(), "serve": None, "final": "", "restarts": {}}
         agents = {}   # Agent の呼び出しの ID → [種類, 子のツールの (呼び出しの ID, 名前), セッションの ID, 担当の ID]
         no_tool = set()   # ツールがないと断られた呼び出しの ID（C-15 で数えない）
+        hooked = set()   # SR-86 のフックが止めた呼び出しの ID（C-1 の denials に数えない）
         for n, events in self.logs:
             reason = end_reason(events)
             if reason in ("rate_limit", "restart") and n != self.logs[-1][0]:
@@ -274,7 +275,7 @@ class Run:
             for t, e in events:
                 kind, parent = e.get("type"), e.get("parent_tool_use_id")
                 if kind == "result":
-                    s["denials"] += len(e.get("permission_denials") or [])
+                    s["denials"] += sum(d.get("tool_use_id") not in hooked for d in e.get("permission_denials") or [])
                     s["final"] = str(e.get("result", ""))
                 if kind == "system" and e.get("subtype") == "compact_boundary" and not parent:
                     s["compactions"] += 1
@@ -307,7 +308,9 @@ class Run:
                         text = result_text(b)
                         if b.get("is_error") and "No such tool available" in text:
                             no_tool.add(b.get("tool_use_id"))
-                        if b.get("is_error") and re.search(r"requested permissions|haven't granted", text):
+                        if b.get("is_error") and re.search(r"PreToolUse:\w+ hook error", text):
+                            hooked.add(b.get("tool_use_id"))
+                        elif b.get("is_error") and re.search(r"requested permissions|haven't granted", text):
                             s["denials"] += 1
                         name, args, t0 = calls.get(b.get("tool_use_id"), ("", {}, t))
                         if name == "Agent" and not parent:
@@ -345,6 +348,7 @@ class Run:
                 s["agents_without_log"] += 1
             s["agent_tool_misuse"] += [f"{kind}:{x}" for x in names if x not in AGENT_TOOLS.get(kind, set())]
         s["models"] = sorted(m for m in s["models"] if m and m != "<synthetic>")
+        s["hook_blocked"] = len(hooked)
         return s
 
     def touches_out(self, name, args):
@@ -399,7 +403,8 @@ def c1(run, s):
                   and s["early_next"] == 0 and reply_ok and models_ok,
                   done=done, check=check.get("passed"), problems=check.get("problem_count"),
                   failed={STAGE_NAMES[k]: f"{f}/{t}" for k, (t, f) in jobs.items()}, questions=s["questions"],
-                  denials=s["denials"], early_next=s["early_next"], reply=reply_ok, restarts=s["restarts"],
+                  denials=s["denials"], hook_blocked=s["hook_blocked"], early_next=s["early_next"], reply=reply_ok,
+                  restarts=s["restarts"],
                   models=s["models"])
 
 
