@@ -15,14 +15,19 @@ def split_lines(text):
 
 
 def read_text(path):
-    """出力先の中のファイルを読む。担当エージェントが書いたファイルもあるので、BOM と行末の \\r を外す。"""
+    """ファイルを読む。担当エージェントが書いたファイルもあるので、BOM と行末の \\r を外す。"""
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
         text = f.read().replace("\r\n", "\n")
     return text[:-1] if text.endswith("\r") else text
 
 
+def page_of(rel):
+    """変換の出力のパス（.work/pdf/D01/0003.md）から、ページの番号を取る。"""
+    return int(rel.rpartition("/")[2][:-3])
+
+
 def read_json(path):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 

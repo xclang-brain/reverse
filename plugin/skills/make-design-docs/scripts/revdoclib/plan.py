@@ -4,10 +4,9 @@ import os
 import re
 
 from . import pdf as pdfmod
-from . import values
+from . import markdown, values
 from .common import Fail
 
-WORD = re.compile(r"[A-Za-z0-9_]+")
 _NOT_NAME_CHAR = re.compile(r"[^A-Za-z0-9._\-\u0080-\U0010ffff]")
 _NOT_PREFIX_CHAR = re.compile(r"[^A-Z0-9]+")
 
@@ -65,6 +64,9 @@ def scan_sources(src, out):
     """(files, excluded, 行ごとのバイト数, UTF-8 のコピーの内容, 語の集まり) を返す。files は 2.3 の 1 の順。"""
     out_key = os.path.normcase(os.path.abspath(out))
     found, excluded, sizes, copies, words = [], [], {}, {}, set()
+    src_key = os.path.normcase(os.path.abspath(src))
+    if src_key == out_key or src_key.startswith(out_key + os.sep):
+        return found, excluded, sizes, copies, words  # 出力先の中のファイルは、どれも載せない
     for d, dirs, names in os.walk(src):
         keep = []
         for name in sorted(dirs):
@@ -94,8 +96,8 @@ def scan_sources(src, out):
             sizes[rel] = line_sizes
             if enc != "utf-8":
                 copies[rel] = text
-            words.update(WORD.findall(text))
-            words.update(WORD.findall(rel))
+            words.update(markdown.WORD.findall(text))
+            words.update(markdown.WORD.findall(rel))
             found.append({"path": rel, "sha1": hashlib.sha1(data).hexdigest(), "lines": len(line_sizes),
                           "bytes": sum(line_sizes), "encoding": enc})
     found.sort(key=lambda f: f["path"].rpartition("/")[::2])

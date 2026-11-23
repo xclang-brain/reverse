@@ -50,10 +50,6 @@ def _pdf_names(plan):
     return {p["id"]: p["name"] for p in plan["pdfs"]}
 
 
-def _page(rel):
-    return int(rel.rpartition("/")[2][:-3])
-
-
 # ---------------------------------------------------------------------------
 # 1 入力を確かめる、2 分けたモジュールの入口のページ
 # ---------------------------------------------------------------------------
@@ -96,7 +92,7 @@ def _write_paged(ctx, rel, title, first, blocks):
     pages = [["# " + title, ""] + first]
     base = len(pages[0])
     for lines, heads in blocks:
-        if len(pages[-1]) + len(lines) > values.MAX_DOC_LINES and len(pages[-1]) > base:
+        if len(_text(pages[-1] + lines).splitlines()) > values.MAX_DOC_LINES and len(pages[-1]) > base:
             pages.append(["# %s（続き %d）" % (title, len(pages) + 1), ""] + heads)
             base = len(pages[-1])
         pages[-1] += lines
@@ -189,7 +185,7 @@ def _failed_target(ctx, job):
     kind, target = job["kind"], job["target"]
     if kind == "convert":
         name = _pdf_names(ctx.plan)[target.split(":")[0]]
-        return "%s p.%s" % (name, "、".join(str(_page(rel)) for rel in job["outputs"]))
+        return "%s p.%s" % (name, "、".join(str(files.page_of(rel)) for rel in job["outputs"]))
     if kind == "match":
         info = files.read_json(ctx.abs(".work/match/%s.json" % job["id"]))
         return "%s の %d 行" % (info["file"], info["count"])
@@ -253,15 +249,15 @@ def _unknowns(ctx, groups):
     blocks = []
     for title, subs in groups:
         head = ["## " + title, ""]
-        blocks.append((head, []))
         subs = [(h, items) for h, items in subs if items]
-        if not subs:
-            blocks.append((["- なし", ""], head))
+        group = [] if subs else [(["- なし", ""], [])]
         for h, items in subs:
             # 切った所の ## と ### の見出しを、続きのファイルの先頭にもう一度書く。
-            blocks += [(([] if k else ["### " + h]) + [x] + ([""] if k == len(items) - 1 else []),
-                        head + (["### " + h] if k else []))
-                       for k, x in enumerate(items)]
+            group += [(([] if k else ["### " + h]) + [x] + ([""] if k == len(items) - 1 else []),
+                       head + (["### " + h] if k else []))
+                      for k, x in enumerate(items)]
+        # ## の見出しだけがファイルの最後に残らないように、最初のブロックにつなげる。
+        blocks += [(head + group[0][0], [])] + group[1:]
     _write_paged(ctx, "docs/review/unknowns.md", "不明点の一覧", [], blocks)
 
 

@@ -12,7 +12,7 @@ DONE_DO = "All jobs are finished. Run: "
 
 
 class Ctx:
-    """1回の next で使う、出力先と計画と状態。"""
+    """出力先と、計画と状態。"""
 
     def __init__(self, out):
         self.out = out
@@ -59,7 +59,7 @@ def _substitute(ctx, job, rel):
         lines = ["# " + target, "", "解析できなかった。ソースコードを直接読む。", ""]
         lines += ["- %s（%d-%d 行）" % (r["path"], r["start"], r["end"]) for r in unit["files"]]
     elif kind == "convert":
-        n = int(rel.rpartition("/")[2][:-3])
+        n = files.page_of(rel)
         lines = ["## 変換できなかったページ", "", "![ページ %d](figure:0,0,1,1)" % n, "",
                  "図の説明：このページは変換できなかった。ページの全体を画像で載せる。"]
     elif kind == "match":
@@ -151,7 +151,7 @@ def _issue(ctx, jobs):
             os.makedirs(os.path.dirname(path), exist_ok=True)
         if job["kind"] == "convert":
             pdf = next(p for p in ctx.plan["pdfs"] if p["id"] == job["target"].split(":")[0])
-            pages = {int(rel.rpartition("/")[2][:-3]) + d for rel in job["outputs"] for d in (-1, 0, 1)}
+            pages = {files.page_of(rel) + d for rel in job["outputs"] for d in (-1, 0, 1)}
             pdfmod.prepare_pages(ctx.pdf_path(pdf), pdf, sorted(p for p in pages if 1 <= p <= pdf["pages"]),
                                  ctx.abs(".work/pdf/" + pdf["id"]))
         instructions.write(ctx, job)

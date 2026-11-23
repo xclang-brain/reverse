@@ -47,7 +47,7 @@ def job_entry(job, stage):
     entry = dict(job, stage=stage, agent=values.AGENTS[job["kind"]], status="pending", tries=0,
                  outputs=_outputs(job), reasons=[], substitute=[])
     if job["kind"] == "convert":
-        entry["pages"] = {str(int(p.rpartition("/")[2][:-3])): {"prev": [], "mermaid": False} for p in entry["outputs"]}
+        entry["pages"] = {str(files.page_of(p)): {"prev": [], "mermaid": False} for p in entry["outputs"]}
     return entry
 
 

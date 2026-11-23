@@ -11,6 +11,7 @@
 import hashlib
 import posixpath
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -419,8 +420,8 @@ def _part_job(out, target):
 def test_distribute_records(tmp_path):
     """A-8：照合の記録が、部分ごと、全体、records.json に振り分けられ、「一致」の範囲の Mermaid の図がモジュールの照合の記録に載り、照合していない範囲が一覧に載る（SR-44、SR-46、SR-81）。"""
     out, job, t = _match_start(tmp_path)
-    # 8 番を覆わない記録。3回とも bad_cover で失敗になり、合格する記録だけが使われる（8.3 の 1）。
-    record = (DISCREPANCY
+    # 0 番があり、8 番を覆わない記録。3回とも bad_cover で失敗になり、合格する記録だけが使われる（8.3 の 1）。
+    record = ("## 0 対象外\n\n" + DISCREPANCY
               + "## 2-3 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n" % (t[2], t[3])
               + "## 4 一致\n- 場所: [kernel/task.c:1-7]\n\n"
               + "## 5 既存設計書のみ\n- モジュール: 全体\n- 内容:\n\n| 優先度 | 用途 |\n| --- | --- |\n| 0 | 割込み処理 |\n\n"
@@ -668,15 +669,19 @@ def test_many_verify_jobs_in_one_file(tmp_path):
 # 8.6 要約、9章 check（失敗として記録したファイル）
 # ---------------------------------------------------------------------------
 
-def test_digest_and_failed_module(tmp_path):
-    """A-8：要約が、部分ごとの行数、役割の最初の行、依存関係の先頭の K 行を持ち、失敗した部分の代わりのファイルは check で不合格に数えない（SR-11、SR-66、SR-67、SR-69）。"""
+ROLE_PARA = "`ActivateTask` は、優先度 1. から順に呼ぶ。"  # 箇条書きでない行。途中の「 1. 」は記号でない（5.1）
+
+
+@pytest.mark.parametrize("role,summary", [(D_ROLE, D_ROLE[2:]), (ROLE_PARA, ROLE_PARA)], ids=["bullet", "paragraph"])
+def test_digest_and_failed_module(tmp_path, role, summary):
+    """A-8：要約が、部分ごとの行数、役割の最初の行（行の先頭の箇条書きの記号だけを除く）、依存関係の先頭の K 行を持ち、失敗した部分の代わりのファイルは check で不合格に数えない（SR-11、SR-66、SR-67、SR-69）。"""
     deps = ["- `TerminateTask` を呼ぶ（%d）。" % k for k in range(1, 13)]
     out = _start(tmp_path, "write_module")
     lib = _part_job(out, "lib")["id"]
     helpers.fake_agent(out, skip=[lib])
     kernel_job = _part_job(out, "kernel")
     for rel in kernel_job["outputs"]:
-        _write(out, rel, _design({"役割": [D_ROLE], "依存関係": deps}) if rel == KERNEL
+        _write(out, rel, _design({"役割": [role], "依存関係": deps}) if rel == KERNEL
                else REQ if rel.startswith("docs/requirements/") else "- なし\n")
 
     def skip_lib(j):
@@ -690,7 +695,7 @@ def test_digest_and_failed_module(tmp_path):
     k_lines = len(_file_lines(docs / "design" / "modules" / "kernel.md"))
     l_lines = len(_file_lines(docs / "design" / "modules" / "lib.md"))
     assert _nonempty(_file_lines(Path(out) / ".work" / "digest.md")) == (
-        ["- kernel（design/modules/kernel.md、%d 行）：%s" % (k_lines, D_ROLE[2:])]
+        ["- kernel（design/modules/kernel.md、%d 行）：%s" % (k_lines, summary)]
         + ["  " + x for x in deps[:10]]
         + ["- lib（design/modules/lib.md、%d 行）：（設計書を作れなかった）" % l_lines])
 
@@ -880,6 +885,34 @@ def test_review_lists_split(tmp_path):
         {"食い違いの一覧": "review/discrepancies.md"}, {"食い違いの一覧（続き 2）": "review/discrepancies~p2.md"},
         {"不明点の一覧": "review/unknowns.md"}, {"不明点の一覧（続き 2）": "review/unknowns~p2.md"}]
     assert _check(out)["passed"] is True
+
+
+
+def test_unknowns_split_boundary(tmp_path):
+    """A-8：不明点の一覧は、ちょうど 1,000 行なら分けず、1,001 行なら分け、どのファイルの ## の下にも項目がある（SR-66。8.7）。"""
+    base = _start(tmp_path, "write_module")
+    helpers.fake_agent(base)
+    rel = next(x for x in _part_job(base, "kernel")["outputs"] if x.startswith(".work/unknowns/"))
+
+    def finish(written):
+        """出力先の写しで、kernel の不明点を written 個にして done まで進め、一覧のファイルの行を返す。"""
+        out = shutil.copytree(str(base), str(tmp_path / ("out-%d" % written)))
+        _write(out, rel, "".join("- `ActivateTask` の不明点 %d。\n" % k for k in range(1, written + 1)))
+        assert _drive(out).data["state"] == "done"
+        review = Path(out) / "docs" / "review"
+        return [_file_lines(p) for p in [review / "unknowns.md"] + sorted(review.glob("unknowns~p*.md"))]
+
+    one = finish(1)
+    assert len(one) == 1
+    rest = len(one[0]) - 1  # 書いた不明点のほかの行の数
+    exact = finish(1000 - rest)
+    assert len(exact) == 1 and len(exact[0]) == 1000
+    over = finish(1001 - rest)
+    assert len(over) == 2 and all(len(lines) <= 1000 for lines in over)
+    for lines in over:  # ## の見出しの下には、次の ## の前までに項目がある
+        heads = [i for i, x in enumerate(lines) if x.startswith("## ")] + [len(lines)]
+        for i, j in zip(heads, heads[1:]):
+            assert any(x.startswith("- ") for x in lines[i + 1:j]), lines[i]
 
 
 # ---------------------------------------------------------------------------

@@ -130,7 +130,9 @@ def test_full_run(tmp_path, mode):
     """A-3：3つの場合で done まで進み、check に合格し、出力先の形が決まりどおりで、mkdocs build が成功し、入力とほかのフォルダが変わらない（SR-07、SR-15、SR-69、SR-72、P-01、P-02）。"""
     src = pdf_dir = None
     if mode != "pdf":
-        src = helpers.make_source_tree(tmp_path / "src", dict(helpers.DEFAULT_LAYOUT, **{"doc/readme.txt": "readme\n"}))
+        # 名前に {{ があるファイルも、対象のソースファイルである（2.1、7.1）
+        src = helpers.make_source_tree(tmp_path / "src", dict(helpers.DEFAULT_LAYOUT, **{"doc/readme.txt": "readme\n",
+                                                                                         "lib/{{slug}}.c": 5}))
     if mode != "source":
         pdf_dir = tmp_path / "pdf"
         helpers.make_text_pdf(pdf_dir / "spec.pdf", pages=3)

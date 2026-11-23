@@ -186,6 +186,8 @@ CONVERT_CASES = [
     pytest.param([(FIG, "![図 1](figure:.1,0.2,0.9,0.5)")], "bad_figure", id="figure_value_form"),
     pytest.param([(FIG, "![](figure:0.1,0.2,0.9,0.5)")], "bad_figure", id="figure_empty_title"),
     pytest.param([("図の説明：箱と線の図である。", "箱と線の図である。")], "bad_figure", id="figure_no_description"),
+    pytest.param([(FIG, FIG + "\n\n```mermaid\nflowchart LR\n    a --> b\n```")], "bad_figure",
+                 id="figure_code_block_next"),
 ]
 
 
@@ -460,6 +462,7 @@ MATCH_CASES = [
     pytest.param([("- 既存の設計書: 上限は 1 である。\n- ソースコード: 上限は 2 である。",
                    "- ソースコード: 上限は 2 である。\n- 既存の設計書: 上限は 1 である。")], "bad_record", id="key_order"),
     pytest.param([("- ソースコード: 上限は 2 である。", "- ソースコード:")], "bad_record", id="empty_value"),
+    pytest.param([("- 場所: [kernel/task.c:4-7]", "- 場所:[kernel/task.c:4-7]")], "bad_record", id="key_without_space"),
     pytest.param([(LEGACY_SENTENCE, "### 見出し\n\n" + LEGACY_SENTENCE)], "bad_record", id="heading_in_content"),
     pytest.param([("- 内容:\n\n{fig}\n\n{desc}\n\n" + LEGACY_SENTENCE + "\n", "- 内容:\n")], "bad_record",
                  id="empty_content"),
@@ -562,6 +565,7 @@ MODULE_CASES = [
     pytest.param("design", _add("- [外](https://example.com/x)、[節](#役割)、`[x](nosuch.md)` を見る。"), None,
                  id="link_not_checked"),
     pytest.param("design", _add("- [説明](nosuch.md) を見る。"), "broken_link", id="broken_link"),
+    pytest.param("design", _add("- [説明]() を見る。"), "broken_link", id="broken_link_empty_path"),
     pytest.param("design", _add(_mermaid("flowchart LR", "    a -->|yes| b").rstrip("\n")), "bad_mermaid",
                  id="bad_mermaid"),
     pytest.param("design", [(DEP, "## 依存関係\n\n### `TASK_*`\n\n" + D_DEP + "\n")], None, id="prefix_star_heading"),
@@ -682,6 +686,7 @@ VERIFY_CASES = [
     pytest.param("role", None, "missing_verdict", id="missing_verdict"),
     pytest.param("role", "[{n}] たぶん正しい", "bad_verdict", id="bad_form"),
     pytest.param("role", "[{n}] OK [kernel/task.c:1-7] 余分な文", "bad_verdict", id="ok_with_text"),
+    pytest.param("role", "[{n}] OK [kernel/task.c:1-7] ", "bad_verdict", id="ok_with_space"),
     pytest.param("role", "[{n}] OK [kernel/task.c:1-7]\n[{n}] OK [kernel/task.c:1-7]", "bad_verdict", id="duplicate"),
     pytest.param("role", "[{n}] 対象外", "bad_verdict", id="not_fact_with_code_span"),
     pytest.param("block", "[{n}] 対象外", "bad_verdict", id="not_fact_code_block"),

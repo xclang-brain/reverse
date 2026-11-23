@@ -187,7 +187,7 @@ def distribute(ctx):
         used = set()
         for rec in records:
             numbers = set(range(rec["start"], rec["end"] + 1)) if rec["start"] is not None else set()
-            if not numbers or rec["problems"] or rec["end"] > info["count"] or numbers & used:
+            if not numbers or rec["problems"] or rec["start"] < 1 or rec["end"] > info["count"] or numbers & used:
                 continue
             used |= numbers
             base = {"job": job["id"], "pdf": pdf, "page": rows[rec["start"]]["page"]}
@@ -467,7 +467,7 @@ def write_digest(ctx):
         if rel in job["substitute"]:
             role = "（設計書を作れなかった）"
         else:
-            role = next((markdown.BULLET.sub("", x, count=1) for x in _first_lines(lines, "## 役割")), "")
+            role = next((x[m.end():] if (m := markdown.BULLET.match(x)) else x for x in _first_lines(lines, "## 役割")), "")
         out.append("- %s（%s、%d 行）：%s" % (job["target"], rel[len("docs/"):], len(lines), role))
         out += ["  " + x for x in _first_lines(lines, "## 依存関係")[:k]]
     files.write_text(ctx.abs(".work/digest.md"), "".join(x + "\n" for x in out))

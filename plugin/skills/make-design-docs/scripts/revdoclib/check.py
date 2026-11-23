@@ -6,7 +6,6 @@ from .scriptwork import PAGE_MARK
 from .state import Ctx
 
 NEW_DOCS = ("docs/design/", "docs/requirements/")
-LENGTH_CHECKED = NEW_DOCS + ("docs/legacy/", "docs/review/")
 LEGACY_RULES = ("bad_table", "bad_tag", "double_underscore")
 
 
@@ -17,7 +16,7 @@ def _skipped(ctx):
         found.update(job["outputs"] + job["substitute"])
         if job["kind"] != "convert":
             continue
-        pages = {int(rel.rpartition("/")[2][:-3]) for rel in job["outputs"]}
+        pages = {files.page_of(rel) for rel in job["outputs"]}
         pdf = next(p for p in ctx.plan["pdfs"] if p["id"] == job["target"].split(":")[0])
         for rel in files.md_files(ctx.out, "docs/legacy/" + pdf["folder"]):
             marks = (PAGE_MARK.fullmatch(x.strip()) for x in jobchecks.read_lines(ctx.abs(rel)))
@@ -42,7 +41,7 @@ def _problems(ctx, rel, writers):
     elems = markdown.parse(lines)
     if rel.startswith(NEW_DOCS):
         return jobchecks.new_doc_problems(ctx, rel, lines, elems, all_names=True)
-    found = jobchecks.too_long(rel, lines) if rel.startswith(LENGTH_CHECKED) else []
+    found = jobchecks.too_long(rel, lines) if rel.startswith(("docs/legacy/", "docs/review/")) else []
     found += jobchecks.link_and_mermaid(ctx, rel, lines, elems)
     if rel.startswith("docs/legacy/"):
         found += [jobchecks.item(r, rel, n, d) for n, r, d in jobchecks.format_problems(lines, elems)

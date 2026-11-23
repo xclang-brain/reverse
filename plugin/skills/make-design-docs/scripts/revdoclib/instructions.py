@@ -2,7 +2,7 @@
 import os
 import re
 
-from . import files, values
+from . import files, jobchecks, values
 from .common import TEMPLATES_DIR
 from .jobchecks import TEXT_SUFFIX
 
@@ -18,10 +18,6 @@ USE_IMAGE = "Mermaid の検査に不合格だった図は、画像で載せる�
 SIDE_NAMES = {"top": "上端", "bottom": "下端", "left": "左端", "right": "右端"}
 NOT_WRITTEN = "書かない"
 PREVIOUS_VERDICTS = "前回の判定のうち、次の番号は使えなかった。"
-
-
-def _page(rel):
-    return int(rel.rpartition("/")[2][:-3])
 
 
 def _with_lines(ctx, rel):
@@ -85,9 +81,8 @@ def _values(ctx, job):
                  unknowns_output=_output(ctx, job, ".work/unknowns/%s.md" % job["id"]))
     elif kind == "write_overall":
         name = target.rpartition("/")[2]
-        with open(os.path.join(TEMPLATES_DIR, "docs", name), "r", encoding="utf-8") as f:
-            title = f.readline().rstrip("\n")[2:]
-        v.update(doc_title=title, template_file=_with_lines(ctx, ".work/templates/" + name),
+        v.update(doc_title=jobchecks.doc_rules(plan, "docs/" + target)[0][2:],
+                 template_file=_with_lines(ctx, ".work/templates/" + name),
                  digest_file=_with_lines(ctx, ".work/digest.md"), modules_dir=ctx.abs("docs/design/modules"),
                  functions_dir=ctx.abs("docs/requirements/3-1-functions"),
                  records_line=("- 照合の記録（既存設計書のみ。語で探す）：" + _with_lines(ctx, ".work/records/overall.md")
@@ -116,7 +111,7 @@ def _convert_values(ctx, job):
     pdf_id = job["target"].split(":")[0]
     pdf = next(p for p in ctx.plan["pdfs"] if p["id"] == pdf_id)
     folder = ".work/pdf/%s/" % pdf_id
-    pages = [_page(rel) for rel in job["outputs"]]
+    pages = [files.page_of(rel) for rel in job["outputs"]]
     rows = ["| ページ | 画像 | 埋め込みテキスト | 書く先 |", "| --- | --- | --- | --- |"]
     for n in pages:
         base = folder + "%04d" % n
@@ -142,10 +137,10 @@ def _fill(name, v):
             raise ValueError("ひな形 %s に、知らない値 {{%s}} がある" % (name, m.group(1)))
         return v[m.group(1)]
 
-    text = _PLACEHOLDER.sub(repl, text)
-    if "{{" in text:
+    # 差し込む値（パスなど）には {{ があってよいので、置き換える前のひな形で調べる。
+    if "{{" in _PLACEHOLDER.sub("", text):
         raise ValueError("ひな形 %s に、置き換えられない {{ が残る" % name)
-    return text.rstrip("\n")
+    return _PLACEHOLDER.sub(repl, text).rstrip("\n")
 
 
 def _entries(job):
@@ -160,7 +155,7 @@ def _entries(job):
                 entries.append([key, (r["file"], r["rule"]), 0])
             continue
         if convert and r["rule"] == "missing_file":
-            place = "p.%d" % _page(r["file"])
+            place = "p.%d" % files.page_of(r["file"])
         elif r["line"] is None:
             place = r["file"]
         else:
@@ -171,11 +166,11 @@ def _entries(job):
             rel, rule = e[1]
             shown = groups[e[1]][:values.REASON_STRINGS]
             text = "".join("「%s」" % s[:values.REASON_STRING_CHARS] for s in shown) + TEXT_SUFFIX[rule]
-            e[1:] = ["- [%s] p.%d：%s%s" % (rule, _page(rel), text, EXTRA_NOTE if rule == "text_extra" else ""),
+            e[1:] = ["- [%s] p.%d：%s%s" % (rule, files.page_of(rel), text, EXTRA_NOTE if rule == "text_extra" else ""),
                      len(shown)]
     if convert and job["tries"] == values.MAX_TRIES - 1:
-        entries += [[(rel, 0), "- [use_image] p.%d：%s" % (_page(rel), USE_IMAGE), 0]
-                    for rel in job["outputs"] if job["pages"][str(_page(rel))]["mermaid"]]
+        entries += [[(rel, 0), "- [use_image] p.%d：%s" % (files.page_of(rel), USE_IMAGE), 0]
+                    for rel in job["outputs"] if job["pages"][str(files.page_of(rel))]["mermaid"]]
     entries.sort(key=lambda e: e[0])
     return entries
 

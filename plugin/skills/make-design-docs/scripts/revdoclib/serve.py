@@ -109,8 +109,9 @@ def run_serve(out):
         if record and record["state"] == "serving" and _responds(record["url"]):
             return _serving(ctx, record)
         if record and record["state"] == "failed":
-            raise Fail("serve_failed", "サイトのビルドかサーバーが失敗した。または、使えるポート（8000〜8099）がない。"
-                       "log はログの最後の部分である。", log=_log_tail(out))
+            raise Fail("serve_failed", "サイトのビルドかサーバーが失敗した。または、使えるポート（%d〜%d）がない。"
+                       "log はログの最後の部分である。" % (values.SERVE_PORTS[0], values.SERVE_PORTS[-1]),
+                       log=_log_tail(out))
         if time.time() >= deadline:
             return {"ok": True, "state": "building", "do": BUILDING_DO + cmd("serve", out)}
         time.sleep(values.SERVE_POLL)

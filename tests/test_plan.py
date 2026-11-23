@@ -279,7 +279,8 @@ def test_init_command_default_out(tmp_path):
 ERROR_CASES = [
     ("bad_path", "bad_path"), ("no_input", "no_input"), ("src_and_pdf_missing", "src_not_found"),
     ("pdf_not_found", "pdf_not_found"), ("no_pdf_files", "no_pdf_files"), ("pdf_unreadable", "pdf_unreadable"),
-    ("no_source_files", "no_source_files"), ("next", "not_initialized"), ("check", "not_initialized"),
+    ("no_source_files", "no_source_files"), ("src_inside_out", "no_source_files"),
+    ("src_is_out", "no_source_files"), ("next", "not_initialized"), ("check", "not_initialized"),
     ("serve", "not_initialized"), ("unknown_command", "bad_arguments"), ("unknown_option", "bad_arguments"),
     ("option_without_value", "bad_arguments"),
 ]
@@ -299,6 +300,7 @@ def _error_argv(tmp_path, case):
     note.write_text("note\n", encoding="utf-8")
     out = tmp_path / "out"
     init = ["init", "--out", out]
+    inside = helpers.make_source_tree(out / "src", {"a.c": 3})  # 出力先の中のファイルは外す（2.1 の表の順1）
     return {
         "bad_path": ["init", "--out", tmp_path / "o'ut"],                          # no_input より先
         "no_input": init,
@@ -307,6 +309,8 @@ def _error_argv(tmp_path, case):
         "no_pdf_files": init + ["--src", docs_only, "--pdf", empty],                # no_source_files より先
         "pdf_unreadable": init + ["--src", docs_only, "--pdf", bad_pdf],            # no_source_files より先
         "no_source_files": init + ["--src", docs_only],
+        "src_inside_out": init + ["--src", inside],
+        "src_is_out": ["init", "--out", inside, "--src", inside],
         "next": ["next", "--out", out],
         "check": ["check", "--out", out],
         "serve": ["serve", "--out", out],
@@ -385,6 +389,10 @@ def test_init_resume(tmp_path):
     pdf = helpers.make_text_pdf(tmp_path / "pdf" / "spec.pdf", pages=1)
     r = helpers.revdoc("init", out, src=src, pdf=pdf)
     assert r.code == 1 and r.data["error"] == "input_changed" and r.data["do"] == INPUT_CHANGED_DO
+
+    # 出力先の中のファイルは、先頭の BOM を外して読む（1.4）
+    (out / ".work" / "plan.json").write_bytes(b"\xef\xbb\xbf" + (out / ".work" / "plan.json").read_bytes())
+    assert helpers.revdoc("init", out, src=src).ok
 
 
 # ---------------------------------------------------------------------------

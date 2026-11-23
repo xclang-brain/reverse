@@ -349,7 +349,7 @@ def _checked_links(line):
     """5.7 で調べるリンクの match。コードスパンを同じ長さの空白にして探すので、位置は元の行と同じである。"""
     masked = _SPAN.sub(lambda m: " " * len(m.group()), line)
     return [m for m in _LINK.finditer(masked)
-            if m.group(1) and not m.group(1).startswith(("http:", "https:", "mailto:", "#"))]
+            if not m.group(1).startswith(("http:", "https:", "mailto:", "#"))]
 
 
 def _resolve(rel, path):

@@ -84,7 +84,7 @@ def check_analyze(ctx, job):
             continue
         found += [item(rule, rel, k, detail) for rule, detail in src.word_problems([loc], m.group(4))]
     if [s["name"] for s in sections] != list(values.MEMO_HEADINGS):
-        found.append(item("missing_heading", rel, None, "8つの見出しが、決まった順にそろっていない。"))
+        found.append(item("missing_heading", rel, None, "%dつの見出しが、決まった順にそろっていない。" % len(values.MEMO_HEADINGS)))
     for s in sections:
         if (s["items"] > 0) == (s["none"] > 0):
             found.append(item("bad_item", rel, s["line"], "見出しの下に、項目か `- なし` のどちらか一方を書く。"))
@@ -118,13 +118,12 @@ def _uncovered(ctx, rel, unit_id, locations):
 def figures(lines, elems):
     """図の行を調べる。(添え字, 図の題, 範囲か None, 不合格の説明か None) のリストを返す。"""
     found = []
-    outside = markdown.outside_code(lines, elems)
-    for i, (k, line) in enumerate(outside):
+    for k, line in markdown.outside_code(lines, elems):
         if "](figure:" not in line:
             continue
         m = _FIGURE.fullmatch(line.strip())
         box = tuple(float(v) for v in m.groups()[1:]) if m else None
-        nxt = next((x for _, x in outside[i + 1:] if x.strip()), "")
+        nxt = next((x for x in lines[k + 1:] if x.strip()), "")
         if not m:
             detail = "図の行が `![<図の題>](figure:<x0>,<y0>,<x1>,<y1>)` の形でない。"
         elif not m.group(1).strip():
@@ -261,7 +260,7 @@ def check_convert(ctx, job):
     n = job["tries"] + 1
     found = []
     for rel in job["outputs"]:
-        page = int(rel.rpartition("/")[2][:-3])
+        page = files.page_of(rel)
         info = job["pages"][str(page)]
         path = ctx.abs(rel)
         if not os.path.isfile(path):
@@ -322,8 +321,8 @@ def _record(ctx, rel, info, lines, k, end):
     for key, j in zip(keys, rows + [None] * len(keys)):
         line = lines[j].rstrip() if j is not None else ""
         head = "- %s:" % key
-        value = line[len(head):].strip() if line.startswith(head) else ""
-        if not line.startswith(head) or (key == CONTENT_KEY) == bool(value):
+        value = line[len(head) + 1:] if line.startswith(head + " ") else ""
+        if (line != head) if key == CONTENT_KEY else (not value or value[0].isspace()):
             bad("bad_record", "キー `%s` の行がない、順番が違う、または値が空である。キーは決まった順に書く。" % key)
             return rec
         rec["values"][key] = value
@@ -575,7 +574,7 @@ def _judge(ctx, t, rest):
     locs, pos = _locations(rest, m.end()) if m else ([], 0)
     tail = rest[pos:]
     fixed = tail[1:] if tail.startswith(" ") else None
-    if not locs or (m.group(1) == "OK" and tail.strip()) or (tail and fixed is None):
+    if not locs or (m.group(1) == "OK" and tail) or (tail and fixed is None):
         return [("bad_verdict", "判定の行が決まった形でない。`[n] OK <根拠>` のように書く。")], None
     kind = m.group(1)
     if kind == "NG" and not block and not fixed:
