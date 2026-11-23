@@ -124,6 +124,8 @@ REASON_STRINGS = 10
 REASON_STRING_CHARS = 40
 # bare_name で、途中に大文字がある語を当てる最小の文字数
 CAMEL_MIN_CHARS = 5
+# bare_name で、前後のページでコードスパンの全体になっている語を当てる最小の文字数
+SPAN_MIN_CHARS = 4
 
 # 6.4 不明点のファイルに、項目がないときの1行
 NO_UNKNOWNS = "- なし"

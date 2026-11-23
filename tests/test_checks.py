@@ -195,6 +195,14 @@ CONVERT_CASES = [
     pytest.param([("タスクの状態を示す。", "tnum_task の状態を示す。")], "bare_name", id="bare_name_underscore"),
     pytest.param([("タスクの状態を示す。", "TaskId の状態を示す。")], "bare_name", id="bare_name_camel"),
     pytest.param([("タスクの状態を示す。", "aBcde の状態を示す。")], "bare_name", id="bare_name_camel_5_chars"),
+    # 同じページでコードスパンの全体になっている 4 文字以上の語は、囲まずに書くと当たる。
+    # 3 文字の語と、コードスパンの一部の語（`Wake up` の Wake）は当たらない
+    pytest.param([("タスクの状態を示す。", "Wake の状態を示す。\n\n`Wake` を呼ぶ。")], "bare_name",
+                 id="bare_name_code_span_word"),
+    pytest.param([("タスクの状態を示す。", "Run の状態を示す。\n\n`Run` を呼ぶ。")], None,
+                 id="bare_name_code_span_word_3_chars"),
+    pytest.param([("タスクの状態を示す。", "Wake の状態を示す。\n\n`Wake up` を呼ぶ。")], None,
+                 id="bare_name_part_of_code_span"),
     # 識別子の形でない語（大文字だけ、先頭だけ大文字、英字のない語、途中に大文字がある 4 文字以下の語）と、
     # コードスパン、コードブロック、`](` を含む行は当たらない
     pytest.param([("タスクの状態を示す。", "TASK と Task と 1_000 と sP と kHz と aBcd の状態を示す。")], None, id="not_bare_name"),
@@ -229,6 +237,68 @@ def test_convert_format_checks(tmp_path, edits, rule):
         assert any(edits[0][1].split()[0] in d for d in details), details
 
 
+@pytest.mark.parametrize("spans,bare", [
+    pytest.param(0, 1, id="previous_page"),
+    pytest.param(1, 0, id="next_page"),
+])
+def test_convert_bare_name_neighbor_page(tmp_path, spans, bare):
+    """A-8：前のページか次のページでコードスパンの全体になっている 4 文字以上の語を、囲まずに書いたページが、bare_name で不合格になる。理由の説明には、当たった語を書く（SR-32）。"""
+    out, job = _convert_start(tmp_path, helpers.make_image_pdf)
+    outputs = job["outputs"]
+    _write(out, outputs[spans], "`Schedule` を呼ぶ。\n")  # このページは囲んでいるので合格する
+    _write(out, outputs[bare], "Schedule を呼ぶ。\n")
+    job = _next_and_assert(out, job["id"], "bare_name")
+    assert job["outputs"] == [outputs[bare]], job  # 渡し直すのは、囲まずに書いたページだけである
+    details = [x["detail"] for x in job["reasons"] if x["rule"] == "bare_name"]
+    assert any("Schedule" in d for d in details), details
+
+
+def _far_pages(tmp_path):
+    """3 ページの PDF で、1 ページ目だけで囲み、3 ページ目で囲まずに書いて、next を呼ぶ。"""
+    out, job = _convert_start(tmp_path, helpers.make_image_pdf, pages=3)
+    outputs = job["outputs"]
+    _write(out, outputs[0], "`Schedule` を呼ぶ。\n")
+    _write(out, outputs[1], "本文。\n")
+    _write(out, outputs[2], "Schedule を呼ぶ。\n")
+    _next_and_assert(out, job["id"], None)
+    return out
+
+
+def test_convert_bare_name_two_pages_away(tmp_path):
+    """A-8：2 ページ離れたページ（P±2）でコードスパンの全体になっている語は、bare_name に当たらない（SR-32。6.2 の P−1、P、P+1）。"""
+    _far_pages(tmp_path)
+
+
+def test_check_legacy_bare_name_neighbor_page(tmp_path):
+    """A-8：check は、docs/legacy/ の bare_name に、同じ PDF の P−1、P、P+1 のページのコードスパンだけを使う（SR-32。9章、6.2）。"""
+    out = _far_pages(tmp_path)
+    r = helpers.run_to_done(out, pdf=tmp_path / "pdf" / "spec.pdf")
+    assert r.ok and r.data["state"] == "done", r.data
+    r = helpers.revdoc("check", out)
+    assert r.ok and r.data["passed"], r.data  # 1 ページ目と 3 ページ目は前後のページでない
+    path = out / "docs" / "legacy" / "spec" / "001.md"
+    text = helpers.read_text(path)
+    _write(out, "docs/legacy/spec/001.md", _edit(text, [("本文。", "Schedule を呼ぶ。")]))  # 2 ページ目
+    r = helpers.revdoc("check", out)
+    assert r.ok and not r.data["passed"], r.data
+    lines = helpers.read_text(path).splitlines()
+    found = [x for x in r.data["problems"] if x["rule"] == "bare_name"]
+    assert [lines.index("Schedule を呼ぶ。") + 1] == [x["line"] for x in found], found
+
+
+def test_convert_bare_name_page_of_done_job(tmp_path):
+    """A-8：前のページの出力が、もう合格した別の仕事のものでも、検査の時点であれば使う（SR-32。6.2）。"""
+    out, first = _convert_start(tmp_path, helpers.make_image_pdf, pages=11)  # 1 つの仕事は 10 ページ
+    second = _issued(out, "convert")[1]
+    _write(out, first["outputs"][-1], "`Schedule` を呼ぶ。\n")
+    os.remove(Path(out) / second["outputs"][0])
+    _next_and_assert(out, first["id"], None)
+    _write(out, second["outputs"][0], "Schedule を呼ぶ。\n")
+    assert helpers.revdoc("next", out).ok
+    job = _job(out, second["id"])
+    assert job["status"] != "done" and "bare_name" in {x["rule"] for x in job["reasons"]}, job
+
+
 def _mermaid(*lines, **kw):
     close = kw.get("close", True)
     return "```mermaid\n" + "".join(line + "\n" for line in lines) + ("```\n" if close else "")
@@ -250,6 +320,9 @@ MERMAID_CASES = [
     pytest.param(_mermaid("graph LR", "    a --> b"), "M2", id="M2"),
     pytest.param(_mermaid("flowchart LR"), "M3", id="M3"),
     pytest.param(_mermaid("stateDiagram-v2", '    s1 --> s2: say "hi'), "M4", id="M4"),
+    pytest.param(_mermaid("flowchart LR", '    a["`SetRelAlarm`等"] --> b'), "M5", id="M5"),
+    # `%%` の行は調べないので、バッククォートがあっても M5 に当たらない
+    pytest.param(_mermaid("flowchart LR", "    %% 条件：`USE_DRAIN`", "    a --> b"), None, id="M5_comment_line"),
     pytest.param(_mermaid("flowchart LR", "    a[起動] --> b"), "F1", id="F1"),
     pytest.param(_mermaid("flowchart LR", "    a[start] --> b"), "F2", id="F2"),
     pytest.param(_mermaid("flowchart LR", "    a -->|yes| b"), "F3", id="F3"),

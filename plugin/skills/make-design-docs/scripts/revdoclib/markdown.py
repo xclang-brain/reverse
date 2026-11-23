@@ -35,6 +35,7 @@ MERMAID_DETAILS = {
     "M2": "1行目が、使える図の種類でない。",
     "M3": "図の中身がない。",
     "M4": "二重引用符の数が奇数である。",
+    "M5": "バッククォートがある。",
     "F1": "引用符の外に、ASCII でない文字がある。",
     "F2": "引用符で囲んでいないラベルがある。",
     "F3": "引用符で囲んでいない矢印のラベルがある。",
@@ -216,6 +217,8 @@ def _row_codes(kind, s):
     """図の中身の1行に当たる番号の並び。s は前後の空白を除いた行。"""
     q = _QUOTED.sub('""', s)
     codes = ["M4"] if s.count('"') % 2 else []
+    if "`" in s:
+        codes.append("M5")
     if kind == "flowchart":
         words = WORD.findall(q)
         if _non_ascii(q):
@@ -256,6 +259,8 @@ def mermaid_problems(lines, elems):
         if len(rows) < 2:
             codes.append("M3")
         found += [(e.start + 1, c) for c in codes]
+        if "`" in header:
+            found.append((rows[0][0] + 1, "M5"))  # M5 は、最初の行にも当てる
         kind = header.split()[0] if header in values.MERMAID_HEADERS else ""
         for k, s in rows[1:]:
             found += [(k + 1, c) for c in _row_codes(kind, s)]

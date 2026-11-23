@@ -194,8 +194,19 @@ def _bare_name(word):
     return ("_" in word and _LETTER.search(word)) or (len(word) >= values.CAMEL_MIN_CHARS and _CAMEL.search(word))
 
 
-def format_problems(lines, elems):
-    """形式の検査（6.2）。(行番号, 検査の名前, 説明) のリストを返す。"""
+def line_span_names(line):
+    """1行で、コードスパンの全体になっている、4 文字以上の語（6.2 の bare_name）。"""
+    return {x for x in markdown.code_spans(line) if len(x) >= values.SPAN_MIN_CHARS and markdown.WORD.fullmatch(x)}
+
+
+def span_names(lines, elems):
+    """コードブロックの外で、コードスパンの全体になっている、4 文字以上の語（6.2 の bare_name）。"""
+    return {x for _, line in markdown.outside_code(lines, elems) for x in line_span_names(line)}
+
+
+def format_problems(lines, elems, spanned):
+    """形式の検査（6.2）。(行番号, 検査の名前, 説明) のリストを返す。
+    spanned は、行の添え字を受けて、その行のページと前後のページでコードスパンの全体になっている語を返す関数。"""
     found = _table_problems(lines, elems)
     found += [(e.start + 1, "unclosed_code", "コードブロックに閉じる行がない。ページの終わりで閉じ、次のページで開き直す。")
               for e in elems if e.kind == "code" and not e.closed]
@@ -205,10 +216,11 @@ def format_problems(lines, elems):
             found.append((k + 1, "bad_tag", "バッククォートの外に、`<br>` のほかのタグがある。"))
         if "__" in text:
             found.append((k + 1, "double_underscore", "バッククォートの外に `__` がある。"))
-        names = [w for w in markdown.WORD.findall(text) if _bare_name(w)] if "](" not in line else []
+        names = [w for w in markdown.WORD.findall(text) if _bare_name(w) or w in spanned(k)] if "](" not in line else []
         if names:
             found.append((k + 1, "bare_name", "バッククォートの外に、識別子の形の語（`_` を含む語、途中に大文字がある "
-                                               "5 文字以上の語）がある：%s。バッククォートで囲む。"
+                                               "5 文字以上の語、このページか前後のページでバッククォートで囲んだ語）"
+                                               "がある：%s。バッククォートで囲む。"
                                                % "、".join("「%s」" % w for w in _dedupe(names))))
     found += [(k + 1, "bad_figure", d) for k, _, _, d in figures(lines, elems) if d]
     found += [(n, "bad_mermaid", d) for n, _, d in markdown.mermaid_problems(lines, elems)]
@@ -278,7 +290,13 @@ def check_convert(ctx, job):
             continue
         lines = read_lines(path)
         elems = markdown.parse(lines)
-        form = [item(rule, rel, k, d) for k, rule, d in format_problems(lines, elems)]
+        spanned = span_names(lines, elems)
+        for near in (page - 1, page + 1):
+            other = os.path.join(os.path.dirname(path), "%04d.md" % near)
+            if os.path.isfile(other):
+                other_lines = read_lines(other)
+                spanned |= span_names(other_lines, markdown.parse(other_lines))
+        form = [item(rule, rel, k, d) for k, rule, d in format_problems(lines, elems, lambda k: spanned)]
         diffs = []
         if files.read_json(path[:-3] + ".json")["check"]:
             lacking, extra = string_diffs(ctx, pdf, page, lines, elems)
