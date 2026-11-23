@@ -195,7 +195,7 @@ SR-62 は欠番である。
 | A | スクリプトの自動テスト（pytest）。モデルを使わない。 | 5.2 のテストがすべて通る。 |
 | B | 読み込みのテスト。`claude` と `copilot` がある Linux の開発の環境で動かす。 | 5.3 をすべて満たす。 |
 | C | 実際に動かす評価。材料を使い、Claude Code でスキルを最後まで動かす。 | 5.4 をすべて満たす。 |
-| D | GitHub Actions の `windows-latest` と `ubuntu-latest` で、Python 3.9 と最新の安定バージョンを使って、A を動かす。 | 4つの組み合わせのすべてで、テストがすべて通る。 |
+| D | GitHub Actions の `windows-latest` と `ubuntu-latest` で、Python 3.9 と最新の安定バージョンを使って、A を動かす。Linux の Python 3.9 は、`ubuntu-24.04` で動かす（`ubuntu-latest` には、Python 3.9 がない）。 | 4つの組み合わせのすべてで、テストがすべて通る。 |
 
 ### 5.2 A の主なテスト
 
