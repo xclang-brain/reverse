@@ -9,6 +9,7 @@
   materials/small/pdf   ATK2 外部仕様書のうち、タスク、カウンタ、アラームのページ（25ページ）
   materials/large/src   ASP3 カーネル（約16.8万行）
   materials/large/pdf   TOPPERS 新世代カーネル統合仕様書 Release 1.7.1
+  materials/cpp/src     QP/C++ 8.1.6 の src と include の .cpp と .hpp（約 6,700 行。GPL-3.0-or-later）
 """
 import shutil
 import subprocess
@@ -22,12 +23,18 @@ DOCS_URL = "https://www.toppers.jp/docs/tech/"
 REPOS = {
     "atk2-sc1": ("https://github.com/toppers/atk2-sc1", "43f2fffecdca2b0fc08d3c581af23046056069bb"),
     "asp3_core": ("https://github.com/toppers/asp3_core", "bcf9a04ff9d1970b1f25967c8caf4e7388f18aad"),
+    "qpcpp": ("https://github.com/QuantumLeaps/qpcpp", "458647c2f8717294a669cf498192f7257b5f0589"),
 }
 PDFS = ["ATK2-0010_ATK2_spec_122.pdf", "ngki_spec-171.pdf"]
 
 SMALL_SOURCE_DIRS = ["kernel", "include"]
 # 1始まりのページ番号（両端を含む）: 2.5 タスク、2.10 カウンタ〜2.12 アラーム
 SMALL_PAGE_RANGES = [(44, 57), (78, 88)]
+
+CPP_SOURCE_DIRS = ["src", "include"]
+CPP_SUFFIXES = (".cpp", ".hpp")
+# 商用のライセンスだけのファイル（ほかは GPL-3.0-or-later との二重ライセンス）
+CPP_EXCLUDED = ["qf_stub.cpp"]
 
 
 def run(*args, cwd=None):
@@ -54,14 +61,21 @@ def fetch_pdf(name):
     return target
 
 
-def copy_tree(source, target):
+def copy_tree(source, target, ignore=shutil.ignore_patterns(".git")):
     if not target.exists():
-        shutil.copytree(source, target, ignore=shutil.ignore_patterns(".git"))
+        shutil.copytree(source, target, ignore=ignore)
+
+
+def ignore_except_cpp(folder, names):
+    """C++ の材料に入れないファイルの名前を返す（フォルダは残す）。"""
+    return [n for n in names
+            if (Path(folder) / n).is_file() and (not n.endswith(CPP_SUFFIXES) or n in CPP_EXCLUDED)]
 
 
 def main():
     atk2 = fetch_repo("atk2-sc1")
     asp3 = fetch_repo("asp3_core")
+    qpcpp = fetch_repo("qpcpp")
     atk2_pdf = fetch_pdf(PDFS[0])
     ngki_pdf = fetch_pdf(PDFS[1])
 
@@ -83,7 +97,10 @@ def main():
         large_pdf.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ngki_pdf, large_pdf)
 
-    for case in ("small", "large"):
+    for name in CPP_SOURCE_DIRS:
+        copy_tree(qpcpp / name, DEST / "cpp" / "src" / name, ignore=ignore_except_cpp)
+
+    for case in ("small", "large", "cpp"):
         print("ok", DEST / case)
     return 0
 
