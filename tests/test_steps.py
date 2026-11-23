@@ -883,10 +883,21 @@ COND_CASES = [
                  "- `valve_drain` は、`1` を返す。" + DRAIN, id="inside"),
     pytest.param("- `valve_close` は、`5` を返す。", "[kernel/cond.c:16-16]",
                  "- `valve_close` は、`5` を返す。", id="outside"),
-    pytest.param("- `valve_drain` と `valve_open` を書く。", "[kernel/cond.c:2-4]",
-                 "- `valve_drain` と `valve_open` を書く。", id="range_starts_outside"),
+    # 範囲の行の半分を超える行が、条件の中（条件の行から #endif の行まで）にあれば、囲む条件とする。
+    pytest.param("- `valve_drain` と `valve_open` を書く。", "[kernel/cond.c:2-4]",  # 3行のうち2行が中
+                 "- `valve_drain` と `valve_open` を書く。" + DRAIN, id="range_starts_before_condition"),
+    pytest.param("- `valve_slow` と `valve_close` を書く。", "[kernel/cond.c:14-16]",  # 3行のうち2行が中
+                 "- `valve_slow` と `valve_close` を書く。（コンパイルの条件：`#elif defined(USE_SLOW)`）",
+                 id="range_ends_after_endif"),
+    pytest.param("- `valve_open` と `valve_drain` を書く。", "[kernel/cond.c:1-4]",  # 4行のうち2行が中（ちょうど半分）
+                 "- `valve_open` と `valve_drain` を書く。", id="range_half_inside"),
+    # 5行のうち、#ifdef USE_DRAIN の中は5行、#if LEVEL > 2 の中は3行。行に USE_DRAIN があるので、その条件は書かない。
     pytest.param("- `USE_DRAIN` のとき、`valve_drain` は `1` を返す。", "[kernel/cond.c:3-7]",
-                 "- `USE_DRAIN` のとき、`valve_drain` は `1` を返す。", id="range_on_condition_lines_and_name_in_line"),
+                 "- `USE_DRAIN` のとき、`valve_drain` は `1` を返す。（コンパイルの条件：`#if LEVEL > 2`）",
+                 id="range_on_condition_lines_and_name_in_line"),
+    # #else の後ろかどうかは、範囲の行のうち、条件の中にある最初の行（6行目。#else より前）で決める。
+    pytest.param("- `valve_deep` と `valve_hold` を書く。", "[kernel/cond.c:6-9]",
+                 "- `valve_deep` と `valve_hold` を書く。" + DRAIN, id="range_over_else"),
     pytest.param("- `valve_guard` を宣言する。", "[kernel/cond.h:5-5]",
                  "- `valve_guard` を宣言する。", id="include_guard"),
     pytest.param("- `valve_extra` を宣言する。", "[kernel/cond.h:7-7]",
@@ -903,8 +914,11 @@ COND_CASES = [
                  id="name_of_outer_in_line"),
     pytest.param("- `valve_drain` と `valve_log` を書く。", "[kernel/cond.c:4-4] [kernel/cond.c:18-18]",
                  "- `valve_drain` と `valve_log` を書く。" + DRAIN, id="all_locations_inside"),
+    # 注を足すかどうかは、1つ目の根拠の場所だけで決める。
     pytest.param("- `valve_drain` と `valve_close` を書く。", "[kernel/cond.c:4-4] [kernel/cond.c:16-16]",
-                 "- `valve_drain` と `valve_close` を書く。", id="one_location_outside"),
+                 "- `valve_drain` と `valve_close` を書く。" + DRAIN, id="first_location_inside"),
+    pytest.param("- `valve_close` と `valve_drain` を書く。", "[kernel/cond.c:16-16] [kernel/cond.c:4-4]",
+                 "- `valve_close` と `valve_drain` を書く。", id="first_location_outside"),
     pytest.param("- `valve_space` を宣言する。", "[kernel/space.h:4-4]",
                  "- `valve_space` を宣言する。", id="include_guard_with_spaces"),
     pytest.param("- `valve_narrow` を宣言する。", "[kernel/space.h:8-8]",
