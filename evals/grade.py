@@ -171,7 +171,7 @@ class Run:
                 if text.strip() != none and re.sub(r"^\s*([-*+]|[0-9]+\.) ", "", text).strip() != none \
                         and sha not in seen:
                     seen.add(sha)
-                    rows.append({"cat": cat, "file": rel, "line": n, "text": text})
+                    rows.append({"cat": cat, "file": rel, "line": n, "text": text, "chain": chains[n - 1]})
         return rows
 
     def table_header(self, row):
@@ -407,6 +407,7 @@ C2_PROPS = {"id": {"type": "integer"}, "verdict": {"type": "string", "enum": VER
             "start": {"type": "integer"}, "end": {"type": "integer"}, "quote": {"type": "string"},
             "names_unquoted": {"type": "boolean"}, "missing_condition": {"type": "boolean"}}
 C2_PROMPT = """次の各項目は、ソースコードについて書いた設計書の行である。項目ごとに、判定を1つ選ぶ。
+各項目には、行のある設計書のファイル名と、行の上にある見出しの並び（上のレベルから）を付けた。行は、その見出しの下で読む。
 
 - 正しい：行の全部を、引用したソースコードの行で確かめられた。
 - 誤り：一部でもソースコードと違う。
@@ -440,6 +441,22 @@ def item_list(items):
     return "\n".join(f"### 項目 {i}\n{text}\n" for i, text in items)
 
 
+def placed(text, row):
+    """C-2 と C-3 で渡す形。行に、設計書のファイル名と見出しの並びを付ける（要件の 5.4）。"""
+    chain = " > ".join(h.lstrip("#").strip() for h in row["chain"]) or "なし"
+    return f"- 設計書：{row['file']}\n- 見出し：{chain}\n- 行：{text}"
+
+
+def false_place(rows, text, k):
+    """誤りと分かっている文に付ける場所。文のコードスパンの名前を前から順に見て、最初に、同じ名前を含む行が
+    見つかった名前で、その行の1つを選ぶ。同じ名前を含む行がないときは、検証の対象の行の1つを選ぶ。"""
+    for name in spans(text):
+        hits = [r for r in rows if re.search(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(name), r["text"])]
+        if hits:
+            return rng(f"C-3-place-{k}").choice(hits)
+    return rng(f"C-3-place-{k}").choice(rows) if rows else {"file": "", "chain": []}
+
+
 def c2_c3(run):
     rows = run.verify_targets()   # 3つの種類から 10 件ずつ抜き取る
     picked = {cat: pick([r for r in rows if r["cat"] == cat], 10, f"C-2-{cat}") for cat in ("fr", "module", "overall")}
@@ -447,7 +464,8 @@ def c2_c3(run):
     false = run.truth["false_statements"] if run.truth and run.kind != "c14-src" else []
     tries, c3_ok, judged = 3 if false else 1, None, None
     for t in range(1, tries + 1):
-        mixed = [(plain(r["text"], run.table_header(r)), r) for r in real] + [(plain(f), None) for f in false]   # 区別を付けずに渡す
+        mixed = [(placed(plain(r["text"], run.table_header(r)), r), r) for r in real] + \
+            [(placed(plain(f), false_place(rows, f, k)), None) for k, f in enumerate(false)]   # 区別を付けずに渡す
         rng(f"C-2-order-{t}").shuffle(mixed)
         items = list(enumerate(mixed, 1))
         answers = run.judge(f"c2-try{t}", C2_PROMPT + "\n" + item_list([(i, m[0]) for i, m in items]), C2_PROPS,
