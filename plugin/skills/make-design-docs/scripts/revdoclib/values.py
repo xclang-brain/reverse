@@ -167,6 +167,9 @@ MARK_BEFORE = {"table": "【既存設計書のみ】次の表は、既存の設�
 CONDITION_EXTENSIONS = ("c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx", "inl")
 CONDITION_LABEL = "コンパイルの条件："
 
+# 8.5 1回目の不明の、次の回の指示に書く説明
+UNKNOWN_ONCE = "前の回の検証担当は、不明とした（探した語：%s）。ソースコードのフォルダの全体を探して、もう一度確かめる。"
+
 # 8.6 要約
 DIGEST_DEPS = 10
 DIGEST_LINES = 2000

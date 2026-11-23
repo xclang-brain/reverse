@@ -649,7 +649,7 @@ def test_legacy_only_inserted(tmp_path):
     for rel in kj["outputs"]:
         _write(out, rel, _design({"役割": [D_ROLE], "処理の流れ": [t[4]], "状態": [D_BLOCK]}, none=NONE_BOTH) if rel == KERNEL
                else REQ if rel.startswith("docs/requirements/") else "- なし\n")
-    # Mermaid の図は、検証に渡ると、どれも不明（消す）にする。
+    # Mermaid の図は、検証に渡ると、どの回でも不明にする（2回続けて不明なので、消える）。
     r = _drive(out, verdict=lambda e: "不明" if e["text"].startswith("```mermaid") else None)
     assert r.data["state"] == "done", r.data
     docs = Path(out) / "docs"
@@ -682,7 +682,7 @@ def test_legacy_only_inserted(tmp_path):
         info = helpers.read_json(Path(out) / ".work" / "verify" / (j["id"] + ".json"))
         assert all(e["text"] not in (MARK_FIG, MARK_TABLE, NONE_BOTH, t[4], t[8], "| 優先度 | 用途 |", SPEC_ROW)
                    and not e["text"].startswith("![") for e in info["lines"]), info
-    # 一致した図でない Mermaid の図は、今までどおり検証の対象になり、不明で消える。一致した図は設計書に残る。
+    # 一致した図でない Mermaid の図は、今までどおり検証の対象になり、2回続けて不明で消える。一致した図は設計書に残る。
     assert D_BLOCK in [e["text"] for _, info in _verify_jobs(out, KERNEL) for e in info["lines"]]
     body = "\n".join(kernel[:kernel.index(LEGACY_HEADING)])
     assert t[4] in body and D_BLOCK not in body, body
@@ -747,18 +747,18 @@ def test_legacy_sentences_verified(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_verdicts_applied(tmp_path):
-    """A-8：判定のとおりに設計書が直り、別の節の同じ文は1つ目が OK、2つ目が不明のとき2つ目だけが消え、置き換えた文が次の回に検証される（SR-63、SR-64、SR-66）。"""
+    """A-8：判定のとおりに設計書が直り、別の節の同じ文は1つ目が OK、2つ目が不明のとき2つ目だけが次の回にもう一度検証され、2回続けて不明なので消え、置き換えた文が次の回に検証される（SR-63、SR-64、SR-66）。"""
     design = _design({"役割": [D_ROLE, D_ROLE, SAME], "公開インターフェース": [D_IFACE],
                       "データ構造": [D_PARA, "", "| 名前 | 値 |", "| --- | --- |", D_ROW],
                       "状態": [D_BLOCK], "依存関係": [SAME]})
-    dep_line = len(design.split("\n")) - design.split("\n")[::-1].index(SAME)  # 依存関係の SAME の行番号
+    dep_sha1 = _sha1(["# kernel", "## 依存関係"], SAME)  # 依存関係の SAME の SHA-1（行番号は、回ごとに変わる）
 
     def verdict(e):
         if e["file"] != KERNEL:
             return None
         if e["text"] == D_IFACE or e["text"].startswith("```"):
             return "NG"
-        if e["text"] == D_ROW or (e["text"] == SAME and e["line"] == dep_line):
+        if e["text"] == D_ROW or e["sha1"] == dep_sha1:
             return "不明"
         return None  # ほかは既定（コードスパンがあれば OK、なければ対象外）
 
@@ -766,9 +766,10 @@ def test_verdicts_applied(tmp_path):
     _drive(out, until="write_overall", verdict=verdict)
     fixed = D_IFACE + "（直した）"
     jobs = _verify_jobs(out, KERNEL)
-    # 同じ節の同じ文（D_ROLE の2行）は1つの番号になる。NG で置き換えた文だけが、2回目の仕事になる。
+    # 同じ節の同じ文（D_ROLE の2行）は1つの番号になる。NG で置き換えた文と、1回目に不明だった行（コードブロックの NG のほか）が、
+    # 2回目の仕事になる。2回目も不明なので、3回目の仕事はない（8.5）。
     assert [[e["text"] for e in info["lines"]] for _, info in jobs] == [
-        [D_ROLE, SAME, D_IFACE, D_PARA, D_ROW, D_BLOCK, SAME], [fixed]]
+        [D_ROLE, SAME, D_IFACE, D_PARA, D_ROW, D_BLOCK, SAME], [fixed, D_ROW, SAME]]
     expected = ["# kernel", "## 役割", D_ROLE, D_ROLE, SAME, "## 公開インターフェース", fixed,
                 "## データ構造", D_PARA, "## 処理の流れ", NONE_SOURCE, "## 状態", NONE_SOURCE, "## 依存関係", NONE_SOURCE]
     for h in helpers.MODULE_HEADINGS[6:]:
@@ -787,6 +788,103 @@ def test_verdicts_applied(tmp_path):
                  "- docs/design/modules/kernel.md「## 状態」：```mermaid"]:
         assert item in items, items
     assert "- docs/design/modules/kernel.md「## 状態」" in _items(unknowns, "### 読み取れる内容がなかった節")
+    assert _check(out)["passed"] is True
+
+
+# 不明の判定を、回ごとに変える行（kernel/task.c の名前を使う）
+D_COUNT = "- `task_count` は、タスクの数である。"
+ONCE = "前の回の検証担当は、不明とした（探した語：%s）。ソースコードのフォルダの全体を探して、もう一度確かめる。"
+
+
+def test_unknown_verified_again(tmp_path):
+    """A-8：1回目の不明では行が残り、SHA-1 が doubted に入って、次の回の検証の仕事になり、指示のファイルに前の回の探した語が書かれる。2回目に OK の行は残って確かめた行になり、2回目も不明の行は消えて不明点の一覧に載る。3回目に初めて不明になった行は、3回目の後に消えて、判定が付かなかった行でなく、確かめられなかった行として載る（SR-63、SR-64、SR-66。4.7、7.2、8.5、8.7）。"""
+    out = _module_start(tmp_path, _design({"役割": [D_ROLE], "公開インターフェース": [D_IFACE],
+                                           "データ構造": [D_COUNT]}))
+    sha = {x: _sha1(["# kernel", "## " + h], x)
+           for h, x in (("役割", D_ROLE), ("公開インターフェース", D_IFACE), ("データ構造", D_COUNT))}
+    # 回ごとの判定。D_COUNT はコードスパンがあるので、対象外の判定は検査に合格しない（6.6）。
+    verdicts = {1: {D_ROLE: "不明", D_IFACE: "不明", D_COUNT: "対象外"},
+                2: {D_ROLE: "OK", D_IFACE: "不明", D_COUNT: "対象外"},
+                3: {D_COUNT: "不明"}}
+
+    def verdict(e):
+        if e["file"] != KERNEL:
+            return None
+        return verdicts[helpers.read_state(out)["round"]].get(e["text"])
+
+    def next_round(k):
+        """代わりの関数で k 回目の判定を書き、next で使う。"""
+        assert helpers.read_state(out)["round"] == k
+        helpers.fake_agent(out, verdict=verdict)
+        r = helpers.revdoc("next", out)
+        assert r.ok, r.data
+
+    def prev_reasons(job):
+        """指示のファイルの「前回の不合格の理由」の節の行。"""
+        text = helpers.read_text(Path(out) / ".work" / "jobs" / (job["id"] + ".md"))
+        assert "## 前回の不合格の理由" in text, text
+        return text.split("## 前回の不合格の理由", 1)[1].split("\n")
+
+    _drive(out, until="verify_module")
+    next_round(1)
+
+    # 1回目の後：不明の行は消えずに残り、SHA-1 が doubted に入る。確かめた行にはならない。
+    state = helpers.read_state(out)
+    assert state["stage"] == "verify_module" and state["round"] == 2, state["stage"]
+    assert sorted(state["doubted"][KERNEL]) == sorted([sha[D_ROLE], sha[D_IFACE]]), state["doubted"]
+    assert not {sha[D_ROLE], sha[D_IFACE]} & set(state["confirmed"].get(KERNEL, [])), state["confirmed"]
+    assert not [x for x in state["log"] if x.get("file") == KERNEL], state["log"]
+    lines = _file_lines(Path(out) / KERNEL)
+    assert _items(lines, "## 役割") == [D_ROLE] and _items(lines, "## 公開インターフェース") == [D_IFACE], lines
+    # 1回目の仕事の reasons に、不明だった行の unknown_once の項目が入る。
+    first = _verify_jobs(out, KERNEL)[0][0]
+    once = [x for x in first["reasons"] if x["rule"] == "unknown_once"]
+    assert sorted((x["n"], x["sha1"]) for x in once) == [(1, sha[D_ROLE]), (2, sha[D_IFACE])], first["reasons"]
+    # 2回目の仕事：不明だった行と、判定が付かなかった行。指示のファイルに、前の回が不明だったことと、探した語が書かれる。
+    jobs = _verify_jobs(out, KERNEL)
+    assert [[e["text"] for e in info["lines"]] for _, info in jobs] == [[D_ROLE, D_IFACE, D_COUNT]] * 2, jobs
+    section = prev_reasons(jobs[1][0])
+    assert "前回の判定のうち、次の番号は使えなかった。" in section, section
+    assert "- [unknown_once] [1]：" + ONCE % "ActivateTask、task_count" in section, section
+    assert "- [unknown_once] [2]：" + ONCE % "TerminateTask、TASK_MAX" in section, section
+    assert not [x for x in section if x.startswith("- [unknown_once] [3]")], section
+
+    next_round(2)
+
+    # 2回目の後：OK の行は残って確かめた行になる。2回続けて不明の行は消え、探した語とともに log に入る。
+    state = helpers.read_state(out)
+    assert state["stage"] == "verify_module" and state["round"] == 3, state["stage"]
+    assert sha[D_ROLE] in state["confirmed"][KERNEL], state["confirmed"]
+    lines = _file_lines(Path(out) / KERNEL)
+    assert _items(lines, "## 役割") == [D_ROLE], lines
+    assert _items(lines, "## 公開インターフェース") == [NONE_SOURCE], lines
+    logs = [(x["type"], x["heading"], x["text"], x.get("words")) for x in state["log"] if x.get("file") == KERNEL]
+    assert logs == [("verify_unknown", "## 公開インターフェース", D_IFACE, "TerminateTask、TASK_MAX")], logs
+    # 3回目の仕事：判定が付かなかった行だけ。不明だった行はないので、unknown_once の項目は書かれない。
+    jobs = _verify_jobs(out, KERNEL)
+    assert [[e["text"] for e in info["lines"]] for _, info in jobs][2:] == [[D_COUNT]], jobs
+    assert not [x for x in prev_reasons(jobs[2][0]) if x.startswith("- [unknown_once]")]
+
+    next_round(3)
+
+    # 3回目の後：3回目に初めて不明になった行は、残った行として消え、verify_unknown として log に入る。
+    state = helpers.read_state(out)
+    assert state["stage"] == "write_overall", state["stage"]
+    lines = _file_lines(Path(out) / KERNEL)
+    assert _items(lines, "## データ構造") == [NONE_SOURCE], lines
+    logs = [(x["type"], x["heading"], x["text"]) for x in state["log"] if x.get("file") == KERNEL]
+    assert logs == [("verify_unknown", "## 公開インターフェース", D_IFACE),
+                    ("verify_unknown", "## データ構造", D_COUNT)], logs
+
+    r = _drive(out)
+    assert r.data["state"] == "done", r.data
+    review = _file_lines(Path(out) / "docs" / "review" / "unknowns.md")
+    items = _items(review, "### 検証で確かめられなかった行")
+    assert "- docs/design/modules/kernel.md「## 公開インターフェース」：" + D_IFACE + "（探した語：TerminateTask、TASK_MAX）" \
+        in items, items
+    assert any(x.startswith("- docs/design/modules/kernel.md「## データ構造」：" + D_COUNT) for x in items), items
+    assert not any(D_ROLE in x for x in items), items
+    assert "### 判定が付かなかった行" not in review, review
     assert _check(out)["passed"] is True
 
 

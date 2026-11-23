@@ -899,7 +899,8 @@ def test_verify_checks(tmp_path, target, verdict, rule):
     assert r.ok, r.data
     done = _job(out, job["id"])
     assert done["status"] == "done", done
-    rules = {x["rule"] for x in done["reasons"] if x.get("n") == n}
+    # 1回目の不明の unknown_once の項目は、検査の不合格ではない（8.5）。
+    rules = {x["rule"] for x in done["reasons"] if x.get("n") == n and x["rule"] != "unknown_once"}
     assert (not rules) if rule is None else (rule in rules), done["reasons"]
 
 

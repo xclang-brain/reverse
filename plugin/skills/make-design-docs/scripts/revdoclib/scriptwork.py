@@ -456,9 +456,10 @@ def next_round(ctx):
         st["round"] += 1
         _make_verify_jobs(ctx)
         return True
-    # 「既存設計書のみ」の文と不明点は、消さずに残す。
-    edits = {rel: [("delete", sha, None, "") for _, h, sha in rows if not _special(rel, h)] for rel, rows in left.items()}
-    _rewrite(ctx, {rel: ops for rel, ops in edits.items() if ops}, "verify_unjudged")
+    # 「既存設計書のみ」の文と不明点は、消さずに残す。3回目に初めて不明になった行は、確かめられなかった行とする。
+    edits = {rel: [("unknown" if sha in st["doubted"].get(rel, []) else "unjudged", sha, None, "")
+                   for _, h, sha in rows if not _special(rel, h)] for rel, rows in left.items()}
+    _rewrite(ctx, {rel: ops for rel, ops in edits.items() if ops})
     return False
 
 
@@ -500,8 +501,9 @@ def _tidy(rel, lines):
     return lines
 
 
-def _rewrite(ctx, edits, log_type):
-    """設計書を直す。edits は {ファイル: [(操作, SHA-1, 直した文, 探した語)]}。操作は replace、note、delete、drop。
+def _rewrite(ctx, edits):
+    """設計書を直す。edits は {ファイル: [(操作, SHA-1, 直した文, 探した語)]}。操作は replace、note、unknown、unjudged、drop。
+    unknown と unjudged は、行を消して、verify_unknown と verify_unjudged として log に入れる。
     drop は、「既存設計書のみ」の文と不明点を、log に入れずに消す。
 
     途中で止まっても、やり直すと同じ結果になるように、消す行の記録を先に保存してから設計書を書き換える。
@@ -530,8 +532,8 @@ def _rewrite(ctx, edits, log_type):
                 continue
             lines, removed = _delete(lines, sha, ctx.plan["none_sentence"])
             for heading, text in removed:
-                entry = {"type": log_type, "file": rel, "heading": heading, "text": text}
-                if log_type == "verify_unknown":
+                entry = {"type": "verify_" + op, "file": rel, "heading": heading, "text": text}
+                if op == "unknown":
                     entry["words"] = words
                 if not any(all(x.get(k) == entry[k] for k in ("type", "file", "heading", "text")) for x in st["log"]):
                     st["log"].append(entry)
@@ -622,10 +624,11 @@ def apply_verdicts(ctx, jobs):
     """判定の記録を調べ、判定のとおりに設計書を直し、仕事を done にする（8.5 の判定の扱い）。"""
     st = ctx.state
     results = [(job,) + jobchecks.check_verify(ctx, job) for job in jobs]
-    edits, confirm, heads = {}, {}, {}
-    for job, info, verdicts, _ in results:
+    edits, confirm, heads, doubt = {}, {}, {}, {}
+    for job, info, verdicts, reasons in results:
         rel = info["file"]
         texts = {e["sha1"]: e["text"] for e in info["lines"]}
+        numbers = {e["sha1"]: e["n"] for e in info["lines"]}
         if rel not in heads:
             lines = jobchecks.read_lines(ctx.abs(rel))
             heads[rel] = {s: h for _, h, s in line_hashes(lines, markdown.parse(lines))}
@@ -641,13 +644,19 @@ def apply_verdicts(ctx, jobs):
                 noted = _with_condition(ctx, texts[sha], locs) if kind == "OK" else None
                 if noted:
                     edits.setdefault(rel, []).append(("note", sha, noted, ""))
+            elif kind == "不明" and sha not in st["doubted"].get(rel, []):
+                # 1回目の不明は、行を変えずに、次の回の検証の仕事にする。
+                doubt.setdefault(rel, []).append(sha)
+                reasons.append(dict(jobchecks.item("unknown_once", job["outputs"][0], None, values.UNKNOWN_ONCE % words),
+                                    n=numbers[sha], sha1=sha))
             else:
-                op = "replace" if fixed is not None else "delete"
+                op = "replace" if fixed is not None else "unknown"
                 edits.setdefault(rel, []).append((op, sha, fixed, words))
-    _rewrite(ctx, edits, "verify_unknown")
-    for rel, shas in confirm.items():
-        known = st["confirmed"].setdefault(rel, [])
-        known += [s for s in dict.fromkeys(shas) if s not in known]
+    _rewrite(ctx, edits)
+    for key, add in (("confirmed", confirm), ("doubted", doubt)):
+        for rel, shas in add.items():
+            known = st[key].setdefault(rel, [])
+            known += [s for s in dict.fromkeys(shas) if s not in known]
     for job, _, _, reasons in results:
         job["status"], job["reasons"] = "done", reasons
     ctx.save()

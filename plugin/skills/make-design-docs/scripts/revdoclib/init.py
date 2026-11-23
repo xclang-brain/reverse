@@ -59,7 +59,7 @@ def job_entry(job, stage):
 def first_state(plan):
     jobs = [job_entry(job, job["kind"]) for job in plan["jobs"]]
     return {"version": 1, "stage": jobs[0]["stage"], "round": 0, "no_output": 0, "next_job": len(jobs) + 1,
-            "jobs": jobs, "confirmed": {}, "log": []}
+            "jobs": jobs, "confirmed": {}, "doubted": {}, "log": []}
 
 
 def _write_new(work, plan, copies, words):

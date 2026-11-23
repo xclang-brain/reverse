@@ -236,9 +236,10 @@ def _assert_first_state(out, plan):
     agents = {"analyze": "reverse:code-analyst", "convert": "reverse:pdf-converter",
               "write_module": "reverse:doc-writer", "write_overall": "reverse:doc-writer"}
     state = helpers.read_state(out)
-    assert {k: state[k] for k in ("version", "stage", "round", "no_output", "next_job", "confirmed", "log")} == {
+    keys = ("version", "stage", "round", "no_output", "next_job", "confirmed", "doubted", "log")
+    assert {k: state.get(k) for k in keys} == {
         "version": 1, "stage": plan["jobs"][0]["kind"], "round": 0, "no_output": 0,
-        "next_job": len(plan["jobs"]) + 1, "confirmed": {}, "log": []}
+        "next_job": len(plan["jobs"]) + 1, "confirmed": {}, "doubted": {}, "log": []}
     assert [j["id"] for j in state["jobs"]] == [j["id"] for j in plan["jobs"]]
     for job, planned in zip(state["jobs"], plan["jobs"]):
         kind, target, jid = planned["kind"], planned["target"], planned["id"]

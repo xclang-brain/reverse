@@ -491,7 +491,10 @@ def test_input_removed_before_finish(tmp_path):
 
 
 def _verdict(e):
-    """kernel の内部設計書の最初の番号の行を「不明」にする。ほかは既定の判定。"""
+    """どの回でも、kernel の内部設計書の最初の番号の行を「不明」にする。ほかは既定の判定。
+
+    1回目に不明にした行は、2回目の仕事の最初の番号になるので、2回続けて不明になり、設計書から消える（8.5）。
+    """
     return "不明" if e["file"] == "docs/design/modules/kernel.md" and e["n"] == 1 else None
 
 
@@ -523,6 +526,17 @@ def test_interrupted_replace(tmp_path, monkeypatch, uninterrupted, stage, resume
     r = helpers.run_to_done(out, src=src, pdf=pdf, stop_at=stage, verdict=_verdict)
     assert r.ok and helpers.read_state(out)["stage"] == stage, r.data
     helpers.fake_agent(out, verdict=_verdict)
+    if stage == "verify_module":
+        # 1回目の不明では、設計書は変わらない。2回目の不明で行を消す回で止める（8.5）。
+        for _ in range(100):
+            r = helpers.revdoc("next", out)
+            state = helpers.read_state(out)
+            assert r.ok, r.data
+            if state["stage"] != "verify_module" or state["round"] != 1:
+                break
+            helpers.fake_agent(out, verdict=_verdict)
+        assert state["stage"] == "verify_module" and state["round"] == 2, (state["stage"], state["round"])
+        helpers.fake_agent(out, verdict=_verdict)
 
     docs = os.path.abspath(str(out / "docs")) + os.sep
     real_replace = os.replace
