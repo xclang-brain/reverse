@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "reverse",
+  "version": "0.1.0",
+  "description": "ソースコードと既存の設計書（PDF）から、新しい設計書を作り、静的サイトで表示する。",
+  "repository": "https://github.com/xclang-brain/reverse"
+}

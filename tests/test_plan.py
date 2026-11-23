@@ -183,6 +183,7 @@ def test_plan_of_small_input(tmp_path):
     kinds += [("write_module", part["name"]) for m in expected_modules for part in m["parts"]]
     kinds += [("write_overall", path) for path, _, _, _ in helpers.OVERALL_FILES]
     assert plan["jobs"] == [{"id": "J%05d" % k, "kind": kind, "target": t} for k, (kind, t) in enumerate(kinds, 1)]
+    _assert_first_state(out, plan)
 
     # 2.9 名前の集まりと、2.4 のモジュールの一覧
     words = set()
@@ -227,6 +228,38 @@ def test_plan_modes(tmp_path, mode):
             assert not (work / name).exists(), name
     assert plan["mode"] == mode
     assert plan["jobs"] == [{"id": "J%05d" % k, "kind": kind, "target": t} for k, (kind, t) in enumerate(expected, 1)]
+    _assert_first_state(out, plan)
+
+
+def _assert_first_state(out, plan):
+    """3章の 3：最初の状態の中身。"""
+    agents = {"analyze": "reverse:code-analyst", "convert": "reverse:pdf-converter",
+              "write_module": "reverse:doc-writer", "write_overall": "reverse:doc-writer"}
+    state = helpers.read_state(out)
+    assert {k: state[k] for k in ("version", "stage", "round", "no_output", "next_job", "confirmed", "log")} == {
+        "version": 1, "stage": plan["jobs"][0]["kind"], "round": 0, "no_output": 0,
+        "next_job": len(plan["jobs"]) + 1, "confirmed": {}, "log": []}
+    assert [j["id"] for j in state["jobs"]] == [j["id"] for j in plan["jobs"]]
+    for job, planned in zip(state["jobs"], plan["jobs"]):
+        kind, target, jid = planned["kind"], planned["target"], planned["id"]
+        pages = None
+        if kind == "analyze":
+            outputs = [".work/memo/%s.md" % target]
+        elif kind == "convert":
+            pdf_id, _, span = target.partition(":")
+            first, _, last = span.partition("-")
+            pages = list(range(int(first), int(last) + 1))
+            outputs = [".work/pdf/%s/%04d.md" % (pdf_id, p) for p in pages]
+        elif kind == "write_module":
+            outputs = ["docs/design/modules/%s.md" % target, "docs/requirements/3-1-functions/%s.md" % target,
+                       ".work/unknowns/%s.md" % jid]
+        else:
+            outputs = ["docs/" + target, ".work/unknowns/%s.md" % jid]
+        expected = dict(planned, stage=kind, agent=agents[kind], status="pending", tries=0,
+                        outputs=sorted(outputs), reasons=[], substitute=[])
+        if pages is not None:
+            expected["pages"] = {str(p): {"prev": [], "mermaid": False} for p in pages}
+        assert dict(job, outputs=sorted(job["outputs"])) == expected, job
 
 
 def test_init_command_default_out(tmp_path):

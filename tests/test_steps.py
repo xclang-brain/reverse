@@ -558,13 +558,13 @@ def test_verdicts_applied(tmp_path):
     assert [[e["text"] for e in info["lines"]] for _, info in jobs] == [
         [D_ROLE, SAME, D_IFACE, D_PARA, D_ROW, D_BLOCK, SAME], [fixed]]
     expected = ["# kernel", "## 役割", D_ROLE, D_ROLE, SAME, "## 公開インターフェース", fixed,
-                "## データ構造", D_PARA, "## 状態", NONE_SOURCE, "## 依存関係", NONE_SOURCE]
+                "## データ構造", D_PARA, "## 処理の流れ", NONE_SOURCE, "## 状態", NONE_SOURCE, "## 依存関係", NONE_SOURCE]
     for h in helpers.MODULE_HEADINGS[6:]:
         expected += ["## " + h, NONE_SOURCE]
     assert _nonempty(_file_lines(Path(out) / KERNEL)) == expected
     logs = [x for x in helpers.read_state(out)["log"] if x["type"] == "verify_unknown" and x["file"] == KERNEL]
-    assert sorted((x["heading"], x["words"]) for x in logs) == [
-        ("## 依存関係", "ActivateTask"), ("## データ構造", "TASK_MAX、16"), ("## 状態", "")]
+    assert sorted((x["heading"], x["words"]) for x in logs) == sorted([
+        ("## 依存関係", "ActivateTask"), ("## データ構造", "TASK_MAX、16"), ("## 状態", "")])
 
     r = _drive(out)
     assert r.data["state"] == "done", r.data
@@ -575,6 +575,19 @@ def test_verdicts_applied(tmp_path):
                  "- docs/design/modules/kernel.md「## 状態」：```mermaid"]:
         assert item in items, items
     assert "- docs/design/modules/kernel.md「## 状態」" in _items(unknowns, "### 読み取れる内容がなかった節")
+    assert _check(out)["passed"] is True
+
+
+def test_unknown_line_links_rewritten(tmp_path):
+    """A-8：不明点の一覧に載せる設計書の行のリンクは、docs/review/ からの相対パスに書き換わり、check に合格する（8.7、9章）。"""
+    linked = "- `TerminateTask` は [要求](../../requirements/3-1-functions/kernel.md) と [全体](../architecture.md#依存関係) を見る。"
+    rewritten = "- `TerminateTask` は [要求](../requirements/3-1-functions/kernel.md) と [全体](../design/architecture.md#依存関係) を見る。"
+    out = _module_start(tmp_path, _design({"役割": [D_ROLE], "依存関係": [linked]}))
+    r = _drive(out, verdict=lambda e: "不明" if e["file"] == KERNEL and e["text"] == linked else None)
+    assert r.data["state"] == "done", r.data
+    items = _items(_file_lines(Path(out) / "docs" / "review" / "unknowns.md"), "### 検証で確かめられなかった行")
+    prefix = "- docs/design/modules/kernel.md「## 依存関係」：" + rewritten
+    assert any(x.startswith(prefix) for x in items), items
     assert _check(out)["passed"] is True
 
 

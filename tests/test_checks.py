@@ -533,7 +533,7 @@ D_BLOCK = "```mermaid\nstateDiagram-v2\n    [*] --> s1\n```"
 D_DEP = "- `TerminateTask` を呼ぶ。"
 DESIGN = ("# kernel\n\n## 役割\n\n" + D_ROLE + "\n\n## 公開インターフェース\n\n" + D_IFACE
           + "\n\n## データ構造\n\n" + D_PARA + "\n\n| 名前 | 値 |\n| --- | --- |\n" + D_ROW
-          + "\n\n## 状態\n\n" + D_BLOCK + "\n\n## 依存関係\n\n" + D_DEP + "\n"
+          + "\n\n## 処理の流れ\n\n" + NONE + "\n\n## 状態\n\n" + D_BLOCK + "\n\n## 依存関係\n\n" + D_DEP + "\n"
           + "".join("\n## %s\n\n%s\n" % (h, NONE) for h in helpers.MODULE_HEADINGS[6:]))
 REQ = ("# 3.1 機能（kernel）\n\n## 機能の要求\n\n"
        "- FR-KERNEL-001: `ActivateTask` は、`id` に `task_count` を足した値を返す。\n"
@@ -749,7 +749,7 @@ def test_verify_numbered_lines(tmp_path):
         "## 役割", "[1] " + D_ROLE,
         "## 公開インターフェース", "[2] " + D_IFACE,
         "## データ構造", "[3] " + D_PARA, "| 名前 | 値 |", "| --- | --- |", "[4] " + D_ROW,
-        "## 状態", "[5] " + D_BLOCK.split("\n")[0]] + D_BLOCK.split("\n")[1:] + [
+        "## 処理の流れ", NONE, "## 状態", "[5] " + D_BLOCK.split("\n")[0]] + D_BLOCK.split("\n")[1:] + [
         "## 依存関係", "[6] " + D_DEP]
 
 

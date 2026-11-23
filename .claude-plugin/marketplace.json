@@ -1,0 +1,13 @@
+{
+  "name": "reverse",
+  "owner": {
+    "name": "xclang-brain"
+  },
+  "plugins": [
+    {
+      "name": "reverse",
+      "source": "./plugin",
+      "description": "ソースコードと既存の設計書（PDF）から、新しい設計書を作り、静的サイトで表示する。"
+    }
+  ]
+}

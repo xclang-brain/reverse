@@ -472,6 +472,22 @@ def test_input_changed_before_finish(tmp_path):
     assert "| 作業中に変わった入力 | 1 |" in _lines(out, "docs/index.md")
 
 
+def test_input_removed_before_finish(tmp_path):
+    """A-7：仕上げの前に PDF が消えて計画を作り直せないときは、保存した計画の全部のファイルが「作業中に変わった入力」に載り、仕上げが終わる（SR-14、8.7 の 1）。"""
+    pdf = helpers.make_text_pdf(tmp_path / "pdf" / "spec.pdf", pages=3)
+    out = tmp_path / "out"
+    assert helpers.revdoc("init", out, pdf=pdf).ok
+    assert helpers.revdoc("next", out).ok and helpers.jobs_with(out, status="issued")
+    assert not helpers.jobs_with(out, status="pending")
+    helpers.fake_agent(out)  # 最後の仕事の出力を書いてから、PDF を消す
+    pdf.unlink()
+    r, _ = _drive(out)
+    assert r.ok and r.data["state"] == "done", r.data
+    unknowns = _lines(out, "docs/review/unknowns.md")
+    assert unknowns[unknowns.index("### 作業中に変わった入力") + 1:] == ["- spec.pdf"]
+    assert "| 作業中に変わった入力 | 1 |" in _lines(out, "docs/index.md")
+
+
 def _verdict(e):
     """kernel の内部設計書の最初の番号の行を「不明」にする。ほかは既定の判定。"""
     return "不明" if e["file"] == "docs/design/modules/kernel.md" and e["n"] == 1 else None
