@@ -186,6 +186,12 @@ CONVERT_CASES = [
     pytest.param([("タスクの状態を示す。", "| a | b |")], "bad_table", id="table_one_line"),
     pytest.param([("タスクの状態を示す。", "<b>タスク</b>の状態を示す。")], "bad_tag", id="tag"),
     pytest.param([("タスクの状態を示す。", "タスク__状態を示す。")], "double_underscore", id="double_underscore"),
+    # 閉じる行のないコードブロック（Mermaid でないものと、Mermaid）は当たり、閉じる行の前後に空白があっても閉じている
+    pytest.param([("    [*] --> s1\n```\n", "    [*] --> s1\n```\n\n```c\nint x = 1;\n")], "unclosed_code",
+                 id="unclosed_code"),
+    pytest.param([("    [*] --> s1\n```\n", "    [*] --> s1\n")], "unclosed_code", id="unclosed_mermaid"),
+    pytest.param([("    [*] --> s1\n```\n", "    [*] --> s1\n```\n\n```c\nint x = 1;\n  ```  \n")], None,
+                 id="closed_code"),
     pytest.param([("タスクの状態を示す。", "tnum_task の状態を示す。")], "bare_name", id="bare_name_underscore"),
     pytest.param([("タスクの状態を示す。", "TaskId の状態を示す。")], "bare_name", id="bare_name_camel"),
     pytest.param([("タスクの状態を示す。", "aBcde の状態を示す。")], "bare_name", id="bare_name_camel_5_chars"),
@@ -447,14 +453,20 @@ LINES = ["Alpha task starts", "Bravo timer stops", "Charlie alarm rings", "Delta
          "Foxtrot lock opens", "Golf counter clears", "Hotel buffer drains", "India signal rises", "Juliet port closes"]
 
 
-def _numbered_page(numbers, plain=0, head=()):
+def _numbered_page(numbers, plain=0, head=(), split=False):
     """行の先頭に numbers の番号を付けた行と、番号のない plain 行を、上から順に置いたページ（行の中身は LINES の順）。
 
     head は、ページの最初に置く項目のリストである。
+    split が真のときは、番号つきの行を、番号の先頭の2文字（例：`17`）と、残り（例：`03 本文`）の2つの文字列に分け、
+    すき間を空けずに並べて置く。埋め込みテキストの行は分けないときと同じ（`1703 本文`）で、単位は2つに分かれる。
     """
     texts = ["%d %s" % (n, LINES[k]) for k, n in enumerate(numbers)]
-    texts += LINES[len(texts):len(texts) + plain]
-    return list(head) + [(56, 120 + 20 * k, t) for k, t in enumerate(texts)]
+    items = []
+    for k, t in enumerate(texts):
+        y = 120 + 20 * k
+        items += [(56, y, t[:2]), (56 + 2 * 0.556 * 11, y, t[2:])] if split else [(56, y, t)]  # 数字の幅は 0.556 em
+    items += [(56, 120 + 20 * k, t) for k, t in enumerate(LINES[len(texts):len(texts) + plain], len(texts))]
+    return list(head) + items
 
 
 def _margin_list(out, job):
@@ -464,19 +476,23 @@ def _margin_list(out, job):
     return [x for x in lines[start:lines.index("### 表と記号")] if x]
 
 
-def test_line_numbers(tmp_path):
-    """A-9：全部の行の先頭に行番号がある PDF では、計画の line_numbers が true になり、.txt と units から行番号が除かれ、指示に行番号の1行が入り、行番号を書かなかった出力が欠けの検査に合格する（SR-34。2.6、6.2、7.3）。"""
+@pytest.mark.parametrize("split", [pytest.param(False, id="one_unit"), pytest.param(True, id="split_units")])
+def test_line_numbers(tmp_path, split):
+    """A-9：全部の行の先頭に行番号がある PDF では、計画の line_numbers が true になり、.txt と units から行番号が除かれ、指示に行番号の1行が入り、行番号を書かなかった出力が欠けの検査に合格する。番号が、続いた2つの単位に分かれていても、units から番号が除かれる（SR-34。2.6、6.2、7.3）。"""
     head = [(56, 40, "SPEC-DOC-0001")]
-    # テキストのファイルを印刷したように、番号はページをまたいで続く（1〜6、7〜12、…）
-    pages = [_numbered_page(range(6 * p + 1, 6 * p + 7), head=head) for p in range(4)]
+    # テキストのファイルを印刷したように、番号はページをまたいで続く（1〜6、7〜12、…）。
+    # 分けるときは、4桁の番号（1701〜1706、1707〜1712、…）を、`17` と `01 本文` の2つの単位に分ける。
+    start = 1701 if split else 1
+    pages = [_numbered_page(range(start + 6 * p, start + 6 * p + 6), head=head, split=split) for p in range(4)]
     out, job = _convert_start(tmp_path, helpers.make_text_pdf, pages=pages)
     assert helpers.read_plan(out)["pdfs"][0]["line_numbers"] is True
     folder = Path(out) / ".work" / "pdf" / "D01"
     for p in range(1, 5):
         assert helpers.read_text(folder / ("%04d.txt" % p)).splitlines() == ["SPEC-DOC-0001"] + LINES[:6], p
         units = helpers.read_json(folder / ("%04d.json" % p))["units"]
-        assert [(u["text"], u["margin"]) for u in units] == (
-            [("SPEC-DOC-0001", True)] + [(t, False) for t in LINES[:6]]), p
+        # 分けたときは、番号の前の2文字の単位が空の文字列になり、残りの単位から、番号の残りと空白1つが除かれる
+        body = [x for t in LINES[:6] for x in ([("", False), (t, False)] if split else [(t, False)])]
+        assert [(u["text"], u["margin"]) for u in units] == [("SPEC-DOC-0001", True)] + body, p
     # 行番号の1行は、ヘッダーの行の後ろの、最後の行である
     assert _margin_list(out, job) == ["- 上端：SPEC-DOC-0001", "- 行の先頭：行番号（数字）"]
     for rel in job["outputs"]:  # 本文だけを、行番号を書かずに書いたページは、欠けの検査に合格する

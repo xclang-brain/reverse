@@ -69,15 +69,32 @@ def _strip_text(text):
     return "\n".join(_LINE_NUMBER.sub("", x) if _NUMBERED.match(x) else x for x in text.split("\n"))
 
 
+def _number_run(units, i, n):
+    """units[i] から、番号 n が始まる単位の並び（1つか、続いた2つ以上）の、最後の添え字を返す。始まらなければ None。"""
+    rest = n
+    for j in range(i, len(units)):
+        if re.match(r"\s*%s(\s|$)" % rest, units[j]["text"]):
+            return j
+        s = units[j]["text"].strip()
+        if not s or not rest.startswith(s):
+            return None
+        rest = rest[len(s):]
+    return None
+
+
 def _strip_units(units, nums):
-    """units は [{"text", ...}]。番号ごとに、前に選んだ単位より後ろの、番号で始まる最初の単位から番号を除く。"""
+    """units は [{"text", ...}]。番号ごとに、前に選んだ単位より後ろの、番号で始まる最初の単位の並びから番号を除く。"""
     k = 0
     for n in nums:
-        head = re.compile(r"^\s*%s(\s|$)" % n)
-        hit = next((i for i in range(k, len(units)) if head.match(units[i]["text"])), None)
-        if hit is not None:
-            units[hit]["text"] = re.sub(r"^\s*%s\s?" % n, "", units[hit]["text"])
-            k = hit + 1
+        hit = next(((i, j) for i in range(k, len(units)) for j in [_number_run(units, i, n)] if j is not None), None)
+        if hit is None:
+            continue
+        i, j = hit
+        for u in units[i:j]:  # 番号の一部だけの単位
+            n = n[len(u["text"].strip()):]
+            u["text"] = ""
+        units[j]["text"] = re.sub(r"^\s*%s\s?" % n, "", units[j]["text"])
+        k = j + 1
 
 
 def unit_height(box):

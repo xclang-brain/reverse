@@ -197,6 +197,8 @@ def _bare_name(word):
 def format_problems(lines, elems):
     """形式の検査（6.2）。(行番号, 検査の名前, 説明) のリストを返す。"""
     found = _table_problems(lines, elems)
+    found += [(e.start + 1, "unclosed_code", "コードブロックに閉じる行がない。ページの終わりで閉じ、次のページで開き直す。")
+              for e in elems if e.kind == "code" and not e.closed]
     for k, line in markdown.outside_code(lines, elems):
         text = markdown.outside_spans(line)
         if _TAG.search(text.replace("<br>", " ")):
