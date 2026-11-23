@@ -776,8 +776,9 @@ def _write_overall(ctx, job, bad):
 
 
 def _fixed(t):
-    """NG の直した文：形（表の行、箇条書き、要求の行、段落）を変えずに、文を変える。"""
-    t = t.rstrip()
+    """NG の直した文：形（表の行、箇条書き、要求の行、段落）を変えずに、文を変える。
+    `【既存設計書のみ】` の印は、直した文に書かない（6.6 の bad_mark）。"""
+    t = t.replace("【既存設計書のみ】", "").rstrip()
     if t.endswith("|"):
         return t[:-1].rstrip() + "（直した） |"
     return t + "（直した）"

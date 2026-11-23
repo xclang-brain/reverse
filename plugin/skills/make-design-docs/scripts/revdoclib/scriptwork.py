@@ -127,7 +127,8 @@ def _add_job(ctx, kind, rel, chunk, suffix=""):
     """仕事を状態の最後に足す。target は <docs/ からのパス>:<最初の番号の行の行番号><suffix>。"""
     st = ctx.state
     job = init.job_entry({"id": "J%05d" % st["next_job"], "kind": kind,
-                          "target": "%s:%d%s" % (rel[len("docs/"):], chunk[0].elem.start + 1, suffix)}, st["stage"])
+                          "target": "%s:%d%s" % (posixpath.relpath(rel, "docs"), chunk[0].elem.start + 1, suffix)},
+                         st["stage"])
     st["next_job"] += 1
     st["jobs"].append(job)
     return job["id"]
@@ -290,11 +291,16 @@ def _joined(lines):
 # 8.4「既存設計書のみ」の記録の差し込み
 # ---------------------------------------------------------------------------
 
-def _mark_line(line):
-    """文の先頭（5.1）に印を足す。"""
+def _split_head(line):
+    """行を、文の先頭（5.1）の前の部分（箇条書きの記号か字下げ）と、文に分ける。"""
     m = markdown.BULLET.match(line)
     head = m.group(0) if m else line[:len(line) - len(line.lstrip())]
-    rest = line[len(head):]
+    return head, line[len(head):]
+
+
+def _mark_line(line):
+    """文の先頭（5.1）に印を足す。"""
+    head, rest = _split_head(line)
     return line if rest.startswith(values.MARKS) else head + values.MARKS[0] + rest
 
 
@@ -355,13 +361,22 @@ def insert_legacy(ctx, job):
 # 8.5 検証の繰り返し
 # ---------------------------------------------------------------------------
 
+def _legacy_sentence(lines, e):
+    """スクリプトが入れた見出しから後ろの行のうち、印の付いた文（表と図の前に置く行を除く）か。"""
+    line = lines[e.start]
+    return (e.kind == "text" and _split_head(line)[1].startswith(values.MARKS[0])
+            and line.strip() not in values.MARK_BEFORE.values())
+
+
 def line_hashes(lines, elems):
-    """スクリプトが入れた見出しより前の本文の行ごとに、(要素, すぐ前の見出し, 行の SHA-1) を返す。"""
-    stack, found = [], []
-    for e in markdown.checked_body(lines, elems):
+    """本文の行ごとに、(要素, すぐ前の見出し, 行の SHA-1) を返す。
+    スクリプトが入れた見出しから後ろでは、印の付いた文だけを返す（すぐ前の見出しは、その見出しになる）。"""
+    stack, found, legacy = [], [], False
+    for e in elems:
         if e.kind == "heading":
             stack = [h for h in stack if h[0] < e.level] + [(e.level, lines[e.start])]
-        elif e.kind in markdown.BODY:
+            legacy = legacy or lines[e.start].strip() == values.LEGACY_HEADING
+        elif e.kind in markdown.BODY and (not legacy or _legacy_sentence(lines, e)):
             heads = [h for _, h in stack]
             text = "\n".join(heads + [markdown.elem_text(lines, e)])
             found.append((e, heads[-1] if heads else "", hashlib.sha1(text.encode("utf-8")).hexdigest()))
@@ -369,14 +384,22 @@ def line_hashes(lines, elems):
 
 
 def verify_files(ctx):
-    """検証の段階の対象のファイル。代わりのファイルは除く。"""
-    kind = "write_module" if ctx.state["stage"] == "verify_module" else "write_overall"
-    found = []
-    for job in (j for j in ctx.state["jobs"] if j["kind"] == kind):
-        t = job["target"]
-        docs = [_design_path(t), "docs/requirements/3-1-functions/%s.md" % t] if kind == "write_module" else ["docs/" + t]
-        found += [rel for rel in docs if rel not in job["substitute"]]
-    return found
+    """検証の段階の対象のファイル。verify_overall では、後ろに全部の執筆の仕事の不明点のファイル。代わりのファイルは除く。"""
+    jobs = ctx.state["jobs"]
+    if ctx.state["stage"] == "verify_module":
+        found = [(j, [_design_path(j["target"]), "docs/requirements/3-1-functions/%s.md" % j["target"]])
+                 for j in jobs if j["kind"] == "write_module"]
+    else:
+        found = [(j, ["docs/" + j["target"]]) for j in jobs if j["kind"] == "write_overall"]
+        found += [(j, [init.unknowns_path(j)]) for j in jobs if j["kind"] in ("write_module", "write_overall")]
+    return [rel for job, docs in found for rel in docs if rel not in job["substitute"]]
+
+
+def _special(rel, heading):
+    """「既存設計書のみ」の文と不明点の行は、8.5 の判定の扱いの2つ目の表で扱う。その種類か None を返す。"""
+    if rel.startswith(".work/unknowns/"):
+        return "unknowns"
+    return "legacy" if heading == values.LEGACY_HEADING else None
 
 
 def _matched_figures(ctx):
@@ -399,7 +422,9 @@ def _targets(ctx, rel):
     found = []
     for e, heading, sha in line_hashes(lines, elems):
         text = markdown.elem_text(lines, e)
-        if sha not in skip and text.strip() != ctx.plan["none_sentence"] and not (e.kind == "code" and text in figures):
+        if (sha not in skip and text.strip() != ctx.plan["none_sentence"]
+                and not (rel.startswith(".work/unknowns/") and text.strip() == values.NO_UNKNOWNS)
+                and not (e.kind == "code" and text in figures)):
             found.append((e, heading, sha))
         skip.add(sha)  # 同じ節の同じ文は、1つの番号で確かめる
     return lines, elems, found
@@ -431,13 +456,15 @@ def next_round(ctx):
         st["round"] += 1
         _make_verify_jobs(ctx)
         return True
-    edits = {rel: [("delete", sha, None, "") for _, _, sha in rows] for rel, rows in left.items() if rows}
-    _rewrite(ctx, edits, "verify_unjudged")
+    # 「既存設計書のみ」の文と不明点は、消さずに残す。
+    edits = {rel: [("delete", sha, None, "") for _, h, sha in rows if not _special(rel, h)] for rel, rows in left.items()}
+    _rewrite(ctx, {rel: ops for rel, ops in edits.items() if ops}, "verify_unjudged")
     return False
 
 
 def _delete(lines, sha, none):
-    """SHA-1 が同じ行を、上から順に1つずつ消す。(行, 消した (見出し, 文) のリスト) を返す。"""
+    """SHA-1 が同じ行を、上から順に1つずつ消す。(行, 消した (見出し, 文) のリスト) を返す。
+    none が None のときは、本文の行がなくなった節に決まった1文を入れない。"""
     removed = []
     while True:
         elems = markdown.parse(lines)
@@ -457,12 +484,25 @@ def _delete(lines, sha, none):
         lines = lines[:start] + lines[end + 1:]
         elems = markdown.parse(lines)
         heads = [i for i, x in enumerate(elems) if x.kind == "heading" and x.start < start]
-        if heads and not jobchecks.section_body(elems, heads[-1]):
+        if none is not None and heads and not jobchecks.section_body(elems, heads[-1]):
             lines.insert(start, none)
 
 
+def _tidy(rel, lines):
+    """「既存設計書のみ」の文か不明点を消した後に、空になった見出しを消し、空になった不明点のファイルを `- なし` にする。"""
+    if rel.startswith(".work/unknowns/"):
+        return lines if any(x.strip() for x in lines) else [values.NO_UNKNOWNS]
+    elems = markdown.parse(lines)
+    i = next((i for i, e in enumerate(elems) if e.kind == "heading" and lines[e.start].strip() == values.LEGACY_HEADING),
+             None)
+    if i is not None and not jobchecks.section_body(elems, i):
+        return _strip_blank(lines[:elems[i].start])
+    return lines
+
+
 def _rewrite(ctx, edits, log_type):
-    """設計書を直す。edits は {ファイル: [(操作, SHA-1, 直した文, 探した語)]}。操作は replace、note、delete。
+    """設計書を直す。edits は {ファイル: [(操作, SHA-1, 直した文, 探した語)]}。操作は replace、note、delete、drop。
+    drop は、「既存設計書のみ」の文と不明点を、log に入れずに消す。
 
     途中で止まっても、やり直すと同じ結果になるように、消す行の記録を先に保存してから設計書を書き換える。
     """
@@ -472,13 +512,21 @@ def _rewrite(ctx, edits, log_type):
         lines = jobchecks.read_lines(ctx.abs(rel))
         for op, sha, fixed, words in ops:
             if op in ("replace", "note"):
-                hits = [e.start for e, _, s in line_hashes(lines, markdown.parse(lines)) if s == sha]
-                for k in hits:
-                    lines[k] = fixed
+                hits = [e for e, _, s in line_hashes(lines, markdown.parse(lines)) if s == sha]
+                new = fixed.split("\n")
+                starts, shift = [], 0  # 置き換えた後の、要素の始まりの行
+                for e in hits:
+                    starts.append(e.start + shift)
+                    shift += len(new) - (e.end - e.start + 1)
+                for e in reversed(hits):
+                    lines[e.start:e.end + 1] = new
                 if op == "note":  # 注を足した行は、確かめた行である
                     known = st["confirmed"].setdefault(rel, [])
                     known += [s for e, _, s in line_hashes(lines, markdown.parse(lines))
-                              if e.start in hits and s not in known]
+                              if e.start in starts and s not in known]
+                continue
+            if op == "drop":
+                lines = _tidy(rel, _delete(lines, sha, None)[0])
                 continue
             lines, removed = _delete(lines, sha, ctx.plan["none_sentence"])
             for heading, text in removed:
@@ -531,7 +579,9 @@ def _conditions(lines):
 
 def _with_condition(ctx, t, locs):
     """根拠の場所が条件付きコンパイルの中にあるときは、条件の注を足した行を返す（8.5 のコンパイルの条件の注）。"""
-    if markdown.FENCE.match(t):
+    rows = t.split("\n")
+    mermaid = rows[0].strip().startswith("```mermaid")
+    if markdown.FENCE.match(t) and not mermaid:
         return None
     enclosing = []
     for rel, start, end in locs:
@@ -542,7 +592,8 @@ def _with_condition(ctx, t, locs):
             return None
         enclosing.append((start, found))
     start, found = enclosing[0]
-    spans = {w for x in markdown.code_spans(t) for w in markdown.WORD.findall(x)}
+    # Mermaid のブロックでは、ブロックの全部の語で決める。
+    spans = set(markdown.WORD.findall(t)) if mermaid else {w for x in markdown.code_spans(t) for w in markdown.WORD.findall(x)}
     notes = []
     for _, _, head, branches in found:
         branch = next((b for k, b in reversed(branches) if k < start), None)
@@ -556,7 +607,11 @@ def _with_condition(ctx, t, locs):
             notes.append(note)
     if not notes:
         return None
-    note = "（コンパイルの条件：%s）" % "、".join(notes)
+    if mermaid:  # 1行目（図の種類の行）の次に、次の行と同じ字下げで、コメントの行を足す
+        nxt = rows[2] if len(rows) > 2 else ""
+        comment = nxt[:len(nxt) - len(nxt.lstrip())] + "%% " + values.CONDITION_LABEL + "、".join(notes)
+        return "\n".join(rows[:2] + [comment] + rows[2:])
+    note = "（%s%s）" % (values.CONDITION_LABEL, "、".join(notes))
     s = t.rstrip()
     if s.startswith("|"):  # 表の行。末尾の | があれば、その前に足す。
         return s[:-1].rstrip() + note + " |" if s.endswith("|") else s + note
@@ -567,18 +622,28 @@ def apply_verdicts(ctx, jobs):
     """判定の記録を調べ、判定のとおりに設計書を直し、仕事を done にする（8.5 の判定の扱い）。"""
     st = ctx.state
     results = [(job,) + jobchecks.check_verify(ctx, job) for job in jobs]
-    edits, confirm = {}, {}
+    edits, confirm, heads = {}, {}, {}
     for job, info, verdicts, _ in results:
+        rel = info["file"]
         texts = {e["sha1"]: e["text"] for e in info["lines"]}
+        if rel not in heads:
+            lines = jobchecks.read_lines(ctx.abs(rel))
+            heads[rel] = {s: h for _, h, s in line_hashes(lines, markdown.parse(lines))}
         for sha, kind, fixed, words, locs in verdicts:
-            if kind in ("OK", "対象外"):
-                confirm.setdefault(info["file"], []).append(sha)
+            special = _special(rel, heads[rel].get(sha))
+            if special:  # 8.5 の判定の扱いの2つ目の表。OK の「既存設計書のみ」の文と、NG の不明点を消す。
+                if kind == {"legacy": "OK", "unknowns": "NG"}[special]:
+                    edits.setdefault(rel, []).append(("drop", sha, None, ""))
+                else:
+                    confirm.setdefault(rel, []).append(sha)
+            elif kind in ("OK", "対象外"):
+                confirm.setdefault(rel, []).append(sha)
                 noted = _with_condition(ctx, texts[sha], locs) if kind == "OK" else None
                 if noted:
-                    edits.setdefault(info["file"], []).append(("note", sha, noted, ""))
+                    edits.setdefault(rel, []).append(("note", sha, noted, ""))
             else:
                 op = "replace" if fixed is not None else "delete"
-                edits.setdefault(info["file"], []).append((op, sha, fixed, words))
+                edits.setdefault(rel, []).append((op, sha, fixed, words))
     _rewrite(ctx, edits, "verify_unknown")
     for rel, shas in confirm.items():
         known = st["confirmed"].setdefault(rel, [])

@@ -4,7 +4,7 @@ import os
 import posixpath
 import re
 
-from . import files, jobchecks, markdown, values
+from . import files, init, jobchecks, markdown, values
 from . import plan as planmod
 from .common import Fail
 from .scriptwork import PAGE_MARK
@@ -128,12 +128,12 @@ def _discrepancies(ctx, records):
 def _written_unknowns(ctx):
     found = []
     for job in ctx.state["jobs"]:
-        path = ctx.abs(".work/unknowns/%s.md" % job["id"])
+        path = ctx.abs(init.unknowns_path(job))
         if job["kind"] not in ("write_module", "write_overall") or not os.path.isfile(path):
             continue
         who = job["target"] if job["kind"] == "write_module" else jobchecks.doc_rules(ctx.plan, "docs/" + job["target"])[0][2:]
         found += ["- %s：%s" % (who, x[2:] if x.startswith("- ") else x.strip())
-                  for x in jobchecks.read_lines(path) if x.strip() and x != "- なし"]
+                  for x in jobchecks.read_lines(path) if x.strip() and x != values.NO_UNKNOWNS]
     return found
 
 

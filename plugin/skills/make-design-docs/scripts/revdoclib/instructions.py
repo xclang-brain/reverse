@@ -2,7 +2,7 @@
 import os
 import re
 
-from . import files, jobchecks, values
+from . import files, init, jobchecks, values
 from .common import TEMPLATES_DIR
 from .jobchecks import TEXT_SUFFIX
 
@@ -78,7 +78,7 @@ def _values(ctx, job):
                  records_line=_records_line(ctx, job["id"]), source_table=_source_table(ctx, units),
                  design_output=_output(ctx, job, "docs/design/modules/%s.md" % target),
                  functions_output=_output(ctx, job, "docs/requirements/3-1-functions/%s.md" % target),
-                 unknowns_output=_output(ctx, job, ".work/unknowns/%s.md" % job["id"]))
+                 unknowns_output=_output(ctx, job, init.unknowns_path(job)))
     elif kind == "write_overall":
         name = target.rpartition("/")[2]
         v.update(doc_title=jobchecks.doc_rules(plan, "docs/" + target)[0][2:],
@@ -88,7 +88,7 @@ def _values(ctx, job):
                  records_line=("- 照合の記録（既存設計書のみ。語で探す）：" + _with_lines(ctx, ".work/records/overall.md")
                                if plan["mode"] == "both" else ""),
                  output=_output(ctx, job, "docs/" + target),
-                 unknowns_output=_output(ctx, job, ".work/unknowns/%s.md" % job["id"]),
+                 unknowns_output=_output(ctx, job, init.unknowns_path(job)),
                  id_prefix=dict(values.OVERALL_FILES)[target] or "なし")
     else:
         folder = ".work/match/" if kind == "match" else ".work/verify/"
@@ -100,9 +100,12 @@ def _values(ctx, job):
             pdf = next(p for p in plan["pdfs"] if doc.startswith("docs/legacy/%s/" % p["folder"]))
             v.update(pdf_name=pdf["name"], memo_dir=ctx.abs(".work/memo"))
         else:
+            # 部分の設計書と機能の要求、write_module の仕事の不明点のファイルでは、その部分の表（7.3）。
+            writer = next((j["target"] for j in ctx.state["jobs"]
+                           if j["kind"] == "write_module" and doc == init.unknowns_path(j)), None)
             part = next((p for m in plan["modules"] for p in m["parts"]
-                         if doc in ("docs/design/modules/%s.md" % p["name"],
-                                    "docs/requirements/3-1-functions/%s.md" % p["name"])), None)
+                         if p["name"] == writer or doc in ("docs/design/modules/%s.md" % p["name"],
+                                                           "docs/requirements/3-1-functions/%s.md" % p["name"])), None)
             v.update(doc_file=doc, source_table=_source_table(ctx, _part_units(ctx, part)) if part else "なし")
     return v
 

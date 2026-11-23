@@ -53,7 +53,7 @@ def _substitute(ctx, job, rel):
     """3回目に出力がなかったファイルの、代わりの中身（4.5 の表）。"""
     kind, target = job["kind"], job["target"]
     if rel.startswith(".work/unknowns/"):
-        lines = ["- なし"]
+        lines = [values.NO_UNKNOWNS]
     elif kind == "analyze":
         unit = next(u for u in ctx.plan["units"] if u["id"] == target)
         lines = ["# " + target, "", "解析できなかった。ソースコードを直接読む。", ""]

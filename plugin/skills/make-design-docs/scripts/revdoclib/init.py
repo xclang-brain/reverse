@@ -36,10 +36,15 @@ def _outputs(job):
         return [".work/pdf/%s/%04d.md" % (pdf_id, n) for n in range(first, last + 1)]
     if kind in ("match", "verify"):
         return [".work/%s/%s.md" % (kind, job["id"])]
-    unknowns = ".work/unknowns/%s.md" % job["id"]
+    unknowns = unknowns_path(job)
     if kind == "write_module":
         return ["docs/design/modules/%s.md" % target, "docs/requirements/3-1-functions/%s.md" % target, unknowns]
     return ["docs/" + target, unknowns]
+
+
+def unknowns_path(job):
+    """執筆の仕事の不明点のファイル。"""
+    return ".work/unknowns/%s.md" % job["id"]
 
 
 def job_entry(job, stage):

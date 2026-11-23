@@ -631,7 +631,7 @@ SPEC_ROW = "| 0 | おそらく割込み処理に使う |"
 
 
 def test_legacy_only_inserted(tmp_path):
-    """A-8：「既存設計書のみ」の記録が、印つきで設計書の見出しの下に入り、1,000 行を超える分は続きのファイルに入り、推測の言い回しのある表を含んでも done の後の check に合格する。一致した図と同じコードブロックは検証の対象にならず、設計書に残る（SR-54、SR-56、SR-58、SR-59、SR-68、SR-69、SR-81）。"""
+    """A-8：「既存設計書のみ」の記録が、印つきで設計書の見出しの下に入り、1,000 行を超える分は続きのファイルに入り、推測の言い回しのある表を含んでも done の後の check に合格する。印の付いた文は検証の対象になり、表と図は対象にならない。一致した図と同じコードブロックは検証の対象にならず、設計書に残る（SR-54、SR-56、SR-58、SR-59、SR-68、SR-69、SR-81、SR-85）。"""
     out, job, t = _match_start(tmp_path)
     record = (DISCREPANCY
               + "## 2-3 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n%s\n\n%s\n\n" % (t[2], t[3], SPECULATION)
@@ -673,10 +673,15 @@ def test_legacy_only_inserted(tmp_path):
     for lines in (kernel, cont, arch):
         assert len(lines) <= 1000 and "E000" not in "\n".join(lines)
 
-    # 差し込んだ記録と決まった1文と一致した図は、検証の対象にならない（SR-59）。
+    # 差し込んだ記録のうち、印の付いた文は検証の対象になる（SR-85）。
+    # 表と図の前の行、表の行、画像の行、コードブロック、決まった1文、一致した図は、対象にならない（SR-59）。
+    kernel_targets = [e["text"] for _, info in _verify_jobs(out, KERNEL) for e in info["lines"]]
+    for x in (t[3], SPECULATION, t[7]):
+        assert MARK + x in kernel_targets, x
     for j in helpers.jobs_with(out, kind="verify"):
         info = helpers.read_json(Path(out) / ".work" / "verify" / (j["id"] + ".json"))
-        assert all(MARK not in e["text"] and e["text"] != NONE_BOTH and e["text"] != t[4] for e in info["lines"]), info
+        assert all(e["text"] not in (MARK_FIG, MARK_TABLE, NONE_BOTH, t[4], t[8], "| 優先度 | 用途 |", SPEC_ROW)
+                   and not e["text"].startswith("![") for e in info["lines"]), info
     # 一致した図でない Mermaid の図は、今までどおり検証の対象になり、不明で消える。一致した図は設計書に残る。
     assert D_BLOCK in [e["text"] for _, info in _verify_jobs(out, KERNEL) for e in info["lines"]]
     body = "\n".join(kernel[:kernel.index(LEGACY_HEADING)])
@@ -686,6 +691,55 @@ def test_legacy_only_inserted(tmp_path):
     assert _nav(_load_mkdocs(out), "内部設計書")[1]["モジュール"] == [
         {"kernel": "design/modules/kernel.md"}, {"kernel（続き 2）": "design/modules/kernel~p2.md"},
         {"lib": "design/modules/lib.md"}]
+
+
+# 「既存設計書のみ」の文（印を付ける前の文）。判定は、L_NA のほかは、テストの中で決める。
+L_OK = "`ActivateTask` は、`task_count` を足した値を返す。"      # OK：設計書から外れる
+L_NG = "`TerminateTask` は、`TASK_MAX` を返す。"                 # NG：残る（直した文は使わない）
+L_UNK = "`ActivateTask` は、優先度の順に呼ばれる。"               # 不明：残る
+L_NA = "スケジューラは、優先度の高いタスクを先に実行する。"       # 対象外（既定の判定）：残る
+L_STAY = "`task_count` は、タスクの数である。"                   # 3回とも合格しない判定：残る
+L_ARCH = "`TerminateTask` を呼ぶ。"                              # 全体の文書の、ただ1つの文。OK で外れる
+
+
+def test_legacy_sentences_verified(tmp_path):
+    """A-8：「既存設計書のみ」の印の付いた文は検証の対象になり、OK の文だけが設計書から外れる。NG、不明、対象外の文と、3回目の後に残った文は残り、次の回の検証の仕事にならず、不明点の一覧に載らない。文がなくなると見出しも消え、決まった1文は入らない（SR-59、SR-85。8.5）。"""
+    out, job, t = _match_start(tmp_path)
+    table = "| 名前 | 値 |\n| --- | --- |\n" + D_ROW
+    content = [t[2], L_OK, L_NG, L_UNK, L_NA, L_STAY, table, t[4]]
+    _write(out, job["outputs"][0], DISCREPANCY
+           + "## 2-7 既存設計書のみ\n- モジュール: kernel\n- 内容:\n\n%s\n\n" % "\n\n".join(content)
+           + "## 8 既存設計書のみ\n- モジュール: 全体\n- 内容:\n\n%s\n" % L_ARCH)
+    _write(out, _second(out, job)["outputs"][0], "## 1-8 対象外\n")
+    verdicts = {MARK + L_OK: "OK", MARK + L_NG: "NG", MARK + L_UNK: "不明", MARK + L_ARCH: "OK",
+                MARK + L_STAY: "対象外"}  # L_STAY はコードスパンがあるので、対象外の判定は検査に合格しない（6.6）
+
+    def verdict(e):
+        return verdicts.get(e["text"])
+
+    _drive(out, until="write_overall", verdict=verdict)
+    image = "![ページ 1 の図](../../legacy/spec/fig/p0001-1.png)"
+    # 印の付いた文だけが番号を振った行になる。判定が合格した文は、次の回の仕事にならない。
+    jobs = _verify_jobs(out, KERNEL)
+    assert [[e["text"] for e in info["lines"] if e["text"].startswith(MARK)] for _, info in jobs] == [
+        [MARK + x for x in (L_OK, L_NG, L_UNK, L_NA, L_STAY)], [MARK + L_STAY], [MARK + L_STAY]]
+    assert all(e["text"] not in (image, D_ROW, t[4]) for _, info in jobs for e in info["lines"]), jobs
+    kernel = _file_lines(Path(out) / KERNEL)
+    assert _after_legacy(kernel) == ([MARK_FIG, image] + [MARK + x for x in (L_NG, L_UNK, L_NA, L_STAY)]
+                                     + [MARK_TABLE] + table.split("\n") + [MARK_FIG] + t[4].split("\n"))
+    assert not any(MARK in x.get("text", "") for x in helpers.read_state(out)["log"])
+
+    r = _drive(out, verdict=verdict)
+    assert r.data["state"] == "done", r.data
+    # 全体の文書は、ただ1つの文が外れて、見出しも消える。決まった1文は足さない。
+    arch = _nonempty(_file_lines(Path(out) / "docs" / "design" / "architecture.md"))
+    headings = helpers.OVERALL_FILES[0][2]
+    assert LEGACY_HEADING not in arch and not any(MARK in x for x in arch), arch
+    assert arch[-2:] == [headings[-1], NONE_BOTH] and arch.count(NONE_BOTH) == len(headings) - 1, arch
+    unknowns = helpers.read_text(Path(out) / "docs" / "review" / "unknowns.md")
+    assert all(x not in unknowns for x in (L_OK, L_NG, L_UNK, L_NA, L_STAY, L_ARCH)), unknowns
+    assert not any(MARK in x.get("text", "") for x in helpers.read_state(out)["log"])
+    assert _check(out)["passed"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +801,13 @@ def test_unknown_line_links_rewritten(tmp_path):
     prefix = "- docs/design/modules/kernel.md「## 依存関係」：" + rewritten
     assert any(x.startswith(prefix) for x in items), items
     assert _check(out)["passed"] is True
+
+
+def test_nashi_in_design_doc_verified(tmp_path):
+    """A-8：設計書の `- なし` の行は、検証の対象になる。除くのは、不明点のファイルの `- なし` の行だけである（8.5）。"""
+    out = _module_start(tmp_path, _design({"役割": [D_ROLE, "- なし"]}))
+    _drive(out, until="write_overall")
+    assert [[e["text"] for e in info["lines"]] for _, info in _verify_jobs(out, KERNEL)][0] == [D_ROLE, "- なし"]
 
 
 def test_rewritten_line_is_verified_again(tmp_path):
@@ -853,6 +914,15 @@ COND_CASES = [
     pytest.param("| `valve_drain` | `1`", "[kernel/cond.c:4-4]", "| `valve_drain` | `1`" + DRAIN,
                  id="table_row_without_last_bar"),
     pytest.param(COND_BLOCK, "[kernel/cond.c:4-4]", COND_BLOCK, id="code_block"),
+    # Mermaid のブロックでは、1行目の次に、次の行と同じ字下げで、注のコメントの行を足す。
+    pytest.param("```mermaid\nflowchart LR\n    valve_open --> valve_drain\n```", "[kernel/cond.c:4-4]",
+                 "```mermaid\nflowchart LR\n    %% コンパイルの条件：`#ifdef USE_DRAIN`\n    valve_open --> valve_drain\n```",
+                 id="mermaid"),
+    pytest.param("```mermaid\nstateDiagram-v2\n  [*] --> USE_DRAIN\n  USE_DRAIN --> valve_deep\n```", "[kernel/cond.c:6-6]",
+                 "```mermaid\nstateDiagram-v2\n  %% コンパイルの条件：`#if LEVEL > 2`\n  [*] --> USE_DRAIN\n"
+                 "  USE_DRAIN --> valve_deep\n```", id="mermaid_name_of_outer_in_block"),
+    pytest.param("```mermaid\nflowchart LR\n    valve_open --> USE_DRAIN\n```", "[kernel/cond.c:4-4]",
+                 "```mermaid\nflowchart LR\n    valve_open --> USE_DRAIN\n```", id="mermaid_name_in_block"),
     pytest.param("- `boot_entry` を定義する。", "[kernel/boot.S:3-3]", "- `boot_entry` を定義する。",
                  id="other_extension"),
 ]
@@ -865,7 +935,7 @@ def _cells(line):
 
 @pytest.mark.parametrize("text,locations,expected", COND_CASES)
 def test_compile_condition_note(tmp_path, text, locations, expected):
-    """A-8：OK の判定の根拠の場所が条件付きコンパイルの中にある行には、行の末尾にコンパイルの条件の注が付き、注を付けた行は次の回の検証の仕事にならない（SR-84。8.5）。"""
+    """A-8：OK の判定の根拠の場所が条件付きコンパイルの中にある行には、行の末尾にコンパイルの条件の注が付き（Mermaid のブロックでは、コメントの行が入り）、注を付けた行は次の回の検証の仕事にならない。注を足した Mermaid のブロックは、Mermaid の検査に合格する（SR-84。5.4、8.5）。"""
     table = text.startswith("|")
     body = ["| 名前 | 値 |", "| --- | --- |", text] if table else text.split("\n")
     out = _module_start(tmp_path, _design({"役割": body}), layout=COND_LAYOUT)
@@ -882,6 +952,9 @@ def test_compile_condition_note(tmp_path, text, locations, expected):
     assert [_cells(x) for x in got] == [_cells(x) for x in want], got
     # 注を足した行は confirmed に入り、次の回の検証の仕事にならない。
     assert len(_verify_jobs(out, KERNEL)) == 1, [i["lines"] for _, i in _verify_jobs(out, KERNEL)]
+    if text.startswith("```mermaid"):  # 注を足したブロックは、done の後の check の Mermaid の検査に合格する
+        assert _drive(out).data["state"] == "done"
+        assert not [p for p in _check(out)["problems"] if p["rule"] == "bad_mermaid"]
 
 
 def test_unjudged_lines_removed_after_round_3(tmp_path):
@@ -939,6 +1012,74 @@ def test_many_verify_jobs_in_one_file(tmp_path):
     confirmed = set(helpers.read_state(out)["confirmed"][KERNEL])
     for h in helpers.MODULE_HEADINGS[:4]:
         assert all(_sha1(["# kernel", "## " + h], x) in confirmed for x in sections[h]), h
+
+
+# 執筆担当が書いた不明点。判定は、U_NA のほかは、テストの中で決める。
+U_ANS = "- `ActivateTask` の戻り値の意味。"   # NG（答えが見つかった）：外れる
+U_OK = "- `TerminateTask` の呼び出し元。"     # OK：残る
+U_UNK = "- `task_count` の上限。"             # 不明：残る
+U_NA = "- 割込みの扱い。"                     # 対象外（既定の判定）：残る
+U_LIB = "- `Timer::method_0001` の用途。"     # NG：外れて、ファイルが `- なし` になる
+U_ARCH = "- `TASK_MAX` の由来。"              # 全体の執筆の不明点。不明：残る
+
+
+def test_unknowns_verified(tmp_path):
+    """A-8：全部の執筆の仕事の不明点のファイルが、全体の文書の後ろで verify_overall の検証の対象になる（`- なし` の行は除く）。答えが見つかった（NG の）不明点は外れて、不明点の一覧に載らず、項目がなくなったファイルは `- なし` になる。指示のファイルのソースファイルの表は、モジュールの不明点ではその部分の表、全体の不明点では `なし` になる（SR-59、SR-85。7.3、8.5）。"""
+    out = _start(tmp_path, "write_module")
+    helpers.fake_agent(out)
+    unknowns = {}
+    for target, items in (("kernel", [U_ANS, U_OK, U_UNK, U_NA]), ("lib", [U_LIB])):
+        rel = next(x for x in _part_job(out, target)["outputs"] if x.startswith(".work/unknowns/"))
+        _write(out, rel, "\n".join(items) + "\n")
+        unknowns[target] = rel
+    _drive(out, until="write_overall")
+    helpers.fake_agent(out)
+    arch_job = next(j for j in helpers.jobs_with(out, kind="write_overall") if j["target"] == "design/architecture.md")
+    unknowns["arch"] = next(x for x in arch_job["outputs"] if x.startswith(".work/unknowns/"))
+    _write(out, unknowns["arch"], U_ARCH + "\n")
+    verdicts = {U_ANS: "NG", U_OK: "OK", U_UNK: "不明", U_LIB: "NG", U_ARCH: "不明"}
+    texts = {}
+
+    def keep_text(j):  # 渡したときの指示のファイルを残しておく。判定はふつうに書く。
+        texts.setdefault(j["id"], helpers.read_text(Path(out) / ".work" / "jobs" / (j["id"] + ".md")))
+        return False
+
+    r = _drive(out, bad=keep_text, verdict=lambda e: verdicts.get(e["text"]))
+    assert r.data["state"] == "done", r.data
+
+    # 不明点のファイルは、全体の文書の後ろに、仕事の順に並ぶ。判定が合格した行は、次の回の仕事にならない。
+    overall_docs = [j["outputs"][0] for j in helpers.jobs_with(out, kind="write_overall")]
+    files = []
+    for j in helpers.jobs_with(out, kind="verify"):
+        f = helpers.read_json(Path(out) / ".work" / "verify" / (j["id"] + ".json"))["file"]
+        if j["stage"] == "verify_overall" and f not in files:
+            files.append(f)
+    assert files == overall_docs + [unknowns["kernel"], unknowns["lib"], unknowns["arch"]], files
+    assert [[e["text"] for e in info["lines"]] for _, info in _verify_jobs(out, unknowns["kernel"])] == [
+        [U_ANS, U_OK, U_UNK, U_NA]]
+    assert [[e["text"] for e in info["lines"]] for _, info in _verify_jobs(out, unknowns["lib"])] == [[U_LIB]]
+    assert [[e["text"] for e in info["lines"]] for _, info in _verify_jobs(out, unknowns["arch"])] == [[U_ARCH]]
+
+    # 指示のファイルのソースファイルの表（7.3）
+    src = helpers.read_plan(out)["src"]
+    header = "| 読むファイル | 行 | 記録に書く名前 |"
+    (kj, _), = _verify_jobs(out, unknowns["kernel"])
+    assert header in texts[kj["id"]] and "| %s | 1-300 | kernel/task.c |" % str(Path(src) / "kernel" / "task.c") \
+        in texts[kj["id"]] and "lib/timer.cpp" not in texts[kj["id"]], texts[kj["id"]]
+    (aj, _), = _verify_jobs(out, unknowns["arch"])
+    assert header not in texts[aj["id"]], texts[aj["id"]]
+
+    # 判定のとおりに、不明点のファイルが直る。log には入らない。
+    assert _nonempty(_file_lines(Path(out) / unknowns["kernel"])) == [U_OK, U_UNK, U_NA]
+    assert _file_lines(Path(out) / unknowns["lib"]) == ["- なし"]
+    assert _nonempty(_file_lines(Path(out) / unknowns["arch"])) == [U_ARCH]
+    assert not [x for x in helpers.read_state(out)["log"] if x.get("file") in unknowns.values()]
+    review = _file_lines(Path(out) / "docs" / "review" / "unknowns.md")
+    items = _items(review, "### 執筆担当が書いた不明点")
+    assert items[:3] == ["- kernel：" + x[2:] for x in (U_OK, U_UNK, U_NA)], items
+    assert any(x.endswith("：" + U_ARCH[2:]) for x in items[3:]), items
+    assert not any(U_ANS[2:] in x or U_LIB[2:] in x for x in review), review
+    assert _check(out)["passed"] is True
 
 
 # ---------------------------------------------------------------------------
