@@ -452,7 +452,8 @@ def test_text_check_decision(tmp_path, maker, text_check, checks, rule):
             for x in helpers.read_text(Path(out) / ".work" / "jobs" / (job["id"] + ".md")).splitlines()
             if x.startswith("|")]
     for rel, check in zip(outputs, checks):
-        cells = next(c for c in rows if c[-1].endswith(rel))
+        # 書く先は OS の書き方の絶対パスなので（7.1）、Windows の `\` 区切りを `/` にそろえて比べる
+        cells = next(c for c in rows if c[-1].replace("\\", "/").endswith(rel))
         assert cells[2].endswith(".txt") if check else cells[2] == "なし", cells
     for rel in outputs:
         _write(out, rel, "Zulu yankee\n")

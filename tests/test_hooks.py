@@ -8,10 +8,13 @@
 - 動かすときのカレントフォルダは、作業フォルダと別のフォルダにする（相対パスを、入力の cwd から解決することを確かめるため）。
 """
 import ast
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
+import sysconfig
 
 import pytest
 
@@ -77,6 +80,26 @@ def _assert_denied(proc):
     # 理由は、英語の1文で、指示のファイルの「書く先」だけに書くように伝える
     reason = output["permissionDecisionReason"]
     assert isinstance(reason, str) and reason.strip() and reason.isascii(), reason
+
+
+def _is_stdlib(name):
+    """モジュールが標準ライブラリかどうかを返す（Python 3.9 には sys.stdlib_module_names がないので、場所で見る）。
+
+    組み込みのモジュールは標準ライブラリに数える。そのほかは、標準ライブラリのフォルダ（stdlib と、拡張モジュールの platstdlib）の下にあれば数える。
+    site-packages（purelib と platlib）の下は、標準ライブラリのフォルダの中にあっても数えない。
+    """
+    spec = importlib.util.find_spec(name.split(".")[0])
+    if spec is None:
+        return False
+    if spec.origin in ("built-in", "frozen"):
+        return True
+    paths = sysconfig.get_paths()
+
+    def under(key):
+        return os.path.normcase(os.path.realpath(spec.origin)).startswith(
+            os.path.normcase(os.path.realpath(paths[key])) + os.sep)
+
+    return (under("stdlib") or under("platstdlib")) and not (under("purelib") or under("platlib"))
 
 
 # 出力先の中で、書き込みを通す場所（出力先からの相対パス）
@@ -210,6 +233,6 @@ def test_guard_py_has_old_python_syntax():
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
             for name in names:
-                if name.split(".")[0] not in sys.stdlib_module_names:
+                if not _is_stdlib(name):
                     found.append("%d 行：標準ライブラリでない %s" % (node.lineno, name))
     assert not found, "guard.py の書き方：\n" + "\n".join(found)
