@@ -43,6 +43,9 @@
 | 小さい材料 11回目 | 2231eea | 11 / 12 | C-9 |
 | PDF だけ 3回目 | 2231eea | 1 / 1 | なし |
 | 小さい材料 12回目 | 7830ad8 | 12 / 12 | なし |
+| PDF だけ 4回目 | 7830ad8 | 1 / 1 | なし |
+| ソースコードだけ（C++）3回目 | 7830ad8 | 2 / 2 | なし |
+| 途中で止めて再開 3回目 | 7830ad8 | 1 / 1 | なし |
 
 ## 回ごとの結果
 
@@ -580,3 +583,43 @@
 記録した数：next: 31、jobs_by_stage: {"analyze": 7, "convert": 3, "write_module": 3, "write_overall": 12, "match": 12, "verify_module": 38, "verify_overall": 23}、verify_rounds: {"verify_module": {"1": 4, "2": 19, "3": 6, "4": 2, "5": 2, "6": 2, "7": 1, "8": 2}, "verify_overall": {"1": 13, "2": 1, "3": 1, "4": 5, "5": 3}}、max_context: 110906、compactions: 0、elapsed_sec: 2300、next_max_sec: 1.2、largest_match_record: 193、next_per_million_lines: 2599、none_sentence_sections: 6、figure_switched: 0、verify_removed: 6
 
 この回の後に直したこと：なし（12 の条件が全部合格）
+
+### PDF だけ 4回目
+
+- `plugin/` のコミット：7830ad82589f6c28fcfe6cf7e1bef2e523bf7d47
+- モデル：claude-sonnet-5-5（記録にあったモデル：claude-sonnet-5-5。独立したエージェント：claude-opus-5-5）
+- Claude Code：2.1.331 (Claude Code)
+- 実行：1 回（1：finished）。かかった時間 111 秒
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-14 | questions: 0、done: true、check: true、failed: 0、site: true | 合格 |
+
+この回の後に直したこと：なし
+
+### ソースコードだけ（C++）3回目
+
+- `plugin/` のコミット：7830ad82589f6c28fcfe6cf7e1bef2e523bf7d47
+- モデル：claude-sonnet-5-5（記録にあったモデル：claude-sonnet-5-5。独立したエージェント：claude-opus-5-5）
+- Claude Code：2.1.331 (Claude Code)
+- 実行：1 回（1：finished）。かかった時間 1377 秒
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-2 | lines: 30、facts: 30、correct: 27、no_basis: 0、not_fact: 0、empty_kinds: []、fr_three_yes: "10/10"、tries: 1 | 合格 |
+| C-14 | questions: 0、done: true、check: true、failed: 0、site: true | 合格 |
+
+この回の後に直したこと：なし
+
+### 途中で止めて再開 3回目
+
+- `plugin/` のコミット：7830ad82589f6c28fcfe6cf7e1bef2e523bf7d47
+- モデル：claude-sonnet-5-5（記録にあったモデル：claude-sonnet-5-5。独立したエージェント：claude-opus-5-5）
+- Claude Code：2.1.331 (Claude Code)
+- 実行：2 回（1：c12_stop、2：finished）。かかった時間 2175 秒
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-12 | stopped: true、done: true、unchanged: "4/4" | 合格 |
+
+この回の後に直したこと：なし
