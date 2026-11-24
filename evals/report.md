@@ -42,6 +42,7 @@
 | 大きい材料 1回目 | 86ff0f5 | 9 / 12 | C-1、C-9、C-10 |
 | 小さい材料 11回目 | 2231eea | 11 / 12 | C-9 |
 | PDF だけ 3回目 | 2231eea | 1 / 1 | なし |
+| 小さい材料 12回目 | 7830ad8 | 12 / 12 | なし |
 
 ## 回ごとの結果
 
@@ -546,3 +547,36 @@
 | C-14 | questions: 0、done: true、check: true、failed: 0、site: true | 合格 |
 
 この回の後に直したこと：（小さい材料の 11 回目の直しと同じ）
+
+### 小さい材料 12回目
+
+- `plugin/` のコミット：7830ad82589f6c28fcfe6cf7e1bef2e523bf7d47
+- モデル：claude-sonnet-5-5（記録にあったモデル：claude-sonnet-5-5。独立したエージェント：claude-opus-5-5）
+- Claude Code：2.1.331 (Claude Code)
+- 実行：1 回（1：finished）。かかった時間 2300 秒
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-1 | done: true、check: true、problems: 0、failed: {"解析": "0/7", "変換": "0/3", "執筆（モジュール）": "0/3", "執筆（全体）": "0/12", "照合": "0/12", "検証": "0/61"}、questions: 0、denials: 0、hook_blocked: 0、early_next: 0、reply: true、restarts: {}、models: ["claude-sonnet-5-5"] | 合格 |
+| C-2 | lines: 30、facts: 30、correct: 29、no_basis: 1、not_fact: 0、empty_kinds: []、fr_three_yes: "10/10"、tries: 1 | 合格 |
+| C-4 | extern: "54/54"、removed: "6/1439"、missing: [] | 合格 |
+| C-6 | items: 12、complete: 12、sampled: "8/10" | 合格 |
+| C-7 | marked: "9/10"、rows: 91、unverifiable: "10/10" | 合格 |
+| C-8 | rows: 9、not_found: "8/9" | 合格 |
+| C-9 | ok_pages: "10/10" | 合格 |
+| C-10 | pages: "24/24"、mermaid_failed: "0/15"、blocked: 0、words: 3、search: {"リスト": 2, "タイマ": 2, "最小周期": 1} | 合格 |
+| C-11 | all: "35656/37597" | 合格 |
+| C-15 | input_changed: 0、plugin_changed: 0、new_files: []、main_file_tools: 0、names_in_plugin: []、agent_tools: []、agents_without_log: 0 | 合格 |
+
+#### 既知の変更に頼る条件
+
+| 条件 | 件数 | 合否 |
+| --- | --- | --- |
+| C-3 | wrong: "5/5"、tries: 1 | 合格 |
+| C-5 | listed: "10/10"、candidates: 198、writes_before: 0 | 合格 |
+
+正解：変えた場所 10 か所（`<`→`<=`、`RUNNING`→`READY`、`UINT_C(0)`→`UINT_C(1)`、`>=`→`>`、`0U`→`1U`、`<`→`<=`、`<=`→`<`、`0U`→`1U`、`maxval + 1U`→`maxval`、`0U`→`1U`）、誤りの文 5 件、既存の設計書にしかない記述 10 件
+
+記録した数：next: 31、jobs_by_stage: {"analyze": 7, "convert": 3, "write_module": 3, "write_overall": 12, "match": 12, "verify_module": 38, "verify_overall": 23}、verify_rounds: {"verify_module": {"1": 4, "2": 19, "3": 6, "4": 2, "5": 2, "6": 2, "7": 1, "8": 2}, "verify_overall": {"1": 13, "2": 1, "3": 1, "4": 5, "5": 3}}、max_context: 110906、compactions: 0、elapsed_sec: 2300、next_max_sec: 1.2、largest_match_record: 193、next_per_million_lines: 2599、none_sentence_sections: 6、figure_switched: 0、verify_removed: 6
+
+この回の後に直したこと：なし（12 の条件が全部合格）
