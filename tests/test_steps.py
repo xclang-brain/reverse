@@ -1012,13 +1012,26 @@ COND_CASES = [
     pytest.param("- `USE_DRAIN` のとき、`valve_deep` は `2` を返す。", "[kernel/cond.c:6-6]",
                  "- `USE_DRAIN` のとき、`valve_deep` は `2` を返す。（コンパイルの条件：`#if LEVEL > 2`）",
                  id="name_of_outer_in_line"),
+    # 根拠の場所が複数あるときは、全部の場所を見て、根拠の場所の順に、その場所を囲む条件を書く。
     pytest.param("- `valve_drain` と `valve_log` を書く。", "[kernel/cond.c:4-4] [kernel/cond.c:18-18]",
-                 "- `valve_drain` と `valve_log` を書く。" + DRAIN, id="all_locations_inside"),
-    # 注を足すかどうかは、1つ目の根拠の場所だけで決める。
+                 "- `valve_drain` と `valve_log` を書く。（コンパイルの条件：`#ifdef USE_DRAIN`、`#ifdef USE_LOG`）",
+                 id="all_locations_inside"),
+    pytest.param("- `valve_log` と `valve_drain` を書く。", "[kernel/cond.c:18-18] [kernel/cond.c:4-4]",
+                 "- `valve_log` と `valve_drain` を書く。（コンパイルの条件：`#ifdef USE_LOG`、`#ifdef USE_DRAIN`）",
+                 id="all_locations_inside_in_order"),
+    # 前に書いた条件と同じ条件（#ifdef USE_DRAIN）は、もう一度は書かない。
+    pytest.param("- `valve_drain` と `valve_deep` を書く。", "[kernel/cond.c:4-4] [kernel/cond.c:6-6]",
+                 "- `valve_drain` と `valve_deep` を書く。（コンパイルの条件：`#ifdef USE_DRAIN`、`#if LEVEL > 2`）",
+                 id="same_condition_once"),
     pytest.param("- `valve_drain` と `valve_close` を書く。", "[kernel/cond.c:4-4] [kernel/cond.c:16-16]",
                  "- `valve_drain` と `valve_close` を書く。" + DRAIN, id="first_location_inside"),
+    # 1つ目の根拠の場所が条件の外にあっても、2つ目の場所の条件を書く。
     pytest.param("- `valve_close` と `valve_drain` を書く。", "[kernel/cond.c:16-16] [kernel/cond.c:4-4]",
-                 "- `valve_close` と `valve_drain` を書く。", id="first_location_outside"),
+                 "- `valve_close` と `valve_drain` を書く。" + DRAIN, id="first_location_outside"),
+    # 行に USE_DRAIN があるので、その条件は書かず、2つ目の場所の条件だけを書く。
+    pytest.param("- `USE_DRAIN` のとき、`valve_drain` と `valve_log` を書く。", "[kernel/cond.c:4-4] [kernel/cond.c:18-18]",
+                 "- `USE_DRAIN` のとき、`valve_drain` と `valve_log` を書く。（コンパイルの条件：`#ifdef USE_LOG`）",
+                 id="all_locations_name_in_line"),
     pytest.param("- `valve_space` を宣言する。", "[kernel/space.h:4-4]",
                  "- `valve_space` を宣言する。", id="include_guard_with_spaces"),
     pytest.param("- `valve_narrow` を宣言する。", "[kernel/space.h:8-8]",
@@ -1035,6 +1048,9 @@ COND_CASES = [
     pytest.param("```mermaid\nstateDiagram-v2\n  [*] --> USE_DRAIN\n  USE_DRAIN --> valve_deep\n```", "[kernel/cond.c:6-6]",
                  "```mermaid\nstateDiagram-v2\n  %% コンパイルの条件：`#if LEVEL > 2`\n  [*] --> USE_DRAIN\n"
                  "  USE_DRAIN --> valve_deep\n```", id="mermaid_name_of_outer_in_block"),
+    pytest.param("```mermaid\nflowchart LR\n    valve_drain --> valve_log\n```", "[kernel/cond.c:4-4] [kernel/cond.c:18-18]",
+                 "```mermaid\nflowchart LR\n    %% コンパイルの条件：`#ifdef USE_DRAIN`、`#ifdef USE_LOG`\n"
+                 "    valve_drain --> valve_log\n```", id="mermaid_all_locations"),
     pytest.param("```mermaid\nflowchart LR\n    valve_open --> USE_DRAIN\n```", "[kernel/cond.c:4-4]",
                  "```mermaid\nflowchart LR\n    valve_open --> USE_DRAIN\n```", id="mermaid_name_in_block"),
     pytest.param("- `boot_entry` を定義する。", "[kernel/boot.S:3-3]", "- `boot_entry` を定義する。",

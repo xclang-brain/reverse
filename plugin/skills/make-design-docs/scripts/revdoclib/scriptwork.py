@@ -585,28 +585,26 @@ def _with_condition(ctx, t, locs):
     mermaid = rows[0].strip().startswith("```mermaid")
     if markdown.FENCE.match(t) and not mermaid:
         return None
-    rel, start, end = locs[0]  # 1つ目の根拠の場所だけで決める
-    if posixpath.splitext(rel)[1][1:].lower() not in values.CONDITION_EXTENSIONS:
-        return None
-    # 範囲の行の半分を超える行が、条件の行から #endif の行までにある条件が、囲む条件である。
-    found = sorted(c for c in _conditions(ctx.sources.lines(rel))
-                   if 2 * (min(end, c[1]) - max(start, c[0]) + 1) > end - start + 1)
-    if not found:
-        return None
     # Mermaid のブロックでは、ブロックの全部の語で決める。
     spans = set(markdown.WORD.findall(t)) if mermaid else {w for x in markdown.code_spans(t) for w in markdown.WORD.findall(x)}
     notes = []
-    for top, _, head, branches in found:
-        first = max(start, top)  # 範囲の行のうち、条件の中にある最初の行で決める
-        branch = next((b for k, b in reversed(branches) if k < first), None)
-        if branch is None:
-            note, words = "`%s`" % head, _condition_words(head)
-        elif _DIRECTIVE.match(branch).group(1) == "else":
-            note, words = "`%s` の `#else`" % head, _condition_words(head)
-        else:
-            note, words = "`%s`" % branch, _condition_words(branch)
-        if not words & spans:
-            notes.append(note)
+    for rel, start, end in locs:  # 根拠の場所の順に見る
+        if posixpath.splitext(rel)[1][1:].lower() not in values.CONDITION_EXTENSIONS:
+            continue
+        # 範囲の行の半分を超える行が、条件の行から #endif の行までにある条件が、囲む条件である。外側から順に並べる。
+        found = sorted(c for c in _conditions(ctx.sources.lines(rel))
+                       if 2 * (min(end, c[1]) - max(start, c[0]) + 1) > end - start + 1)
+        for top, _, head, branches in found:
+            first = max(start, top)  # 範囲の行のうち、条件の中にある最初の行で決める
+            branch = next((b for k, b in reversed(branches) if k < first), None)
+            if branch is None:
+                note, words = "`%s`" % head, _condition_words(head)
+            elif _DIRECTIVE.match(branch).group(1) == "else":
+                note, words = "`%s` の `#else`" % head, _condition_words(head)
+            else:
+                note, words = "`%s`" % branch, _condition_words(branch)
+            if not words & spans and note not in notes:  # 前に書いた条件と同じ条件は書かない
+                notes.append(note)
     if not notes:
         return None
     if mermaid:  # 1行目（図の種類の行）の次に、次の行と同じ字下げで、コメントの行を足す
