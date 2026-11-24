@@ -391,23 +391,30 @@ def make_unmapped_pdf(path, pages=1, text="ABCDEF", mapped=""):
     text の全部の文字で FPDFText_HasUnicodeMapError が 1 になる（SR-37 の判定に当たる）。text は A〜Z だけにする。
     mapped は、各ページの text の下の行に、標準フォントの Helvetica で書く ASCII の文字列である。
     この文字は対応づけられるので、対応づけられない文字の割合を決められる。
+    text と mapped をページごとのリストにすると、ページごとに中身を変えられる（pages はリストの長さになる）。
     """
-    glyphs = sorted(set(text))
+    texts = text if isinstance(text, list) else [text] * pages
+    mappeds = mapped if isinstance(mapped, list) else [mapped] * len(texts)
+    pages = len(texts)
+    glyphs = sorted(set("".join(texts)))
     first, last = ord(glyphs[0]), ord(glyphs[-1])
     names = " ".join("/g%d" % c for c in range(first, last + 1))
     procs = " ".join("/g%d %d 0 R" % (c, 4 + 2 * pages) for c in range(first, last + 1))
     widths = " ".join("600" for _ in range(first, last + 1))
     kids = " ".join("%d 0 R" % (3 + 2 * i) for i in range(pages))
-    content = b"BT /F1 12 Tf 72 700 Td (" + text.encode("ascii") + b") Tj ET"
-    if mapped:
-        content += b" BT /F2 12 Tf 72 600 Td (" + mapped.encode("ascii") + b") Tj ET"
+    contents = []
+    for t, m in zip(texts, mappeds):
+        content = b"BT /F1 12 Tf 72 700 Td (" + t.encode("ascii") + b") Tj ET" if t else b""
+        if m:
+            content += b" BT /F2 12 Tf 72 600 Td (" + m.encode("ascii") + b") Tj ET"
+        contents.append(content)
     glyph = b"600 0 0 0 500 500 d1 0 0 500 500 re f"
     objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
             b"<< /Type /Pages /Kids [" + kids.encode() + b"] /Count %d >>" % pages]
     for i in range(pages):
         objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 %d 0 R"
                     b" /F2 %d 0 R >> >> /Contents %d 0 R >>" % (3 + 2 * pages, 5 + 2 * pages, 4 + 2 * i))
-        objs.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
+        objs.append(b"<< /Length %d >>\nstream\n" % len(contents[i]) + contents[i] + b"\nendstream")
     objs.append(b"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0]"
                 b" /CharProcs << " + procs.encode() + b" >> /Encoding << /Type /Encoding /Differences [%d " % first
                 + names.encode() + b"] >> /FirstChar %d /LastChar %d /Widths [" % (first, last)

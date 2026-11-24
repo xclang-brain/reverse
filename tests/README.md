@@ -31,7 +31,7 @@
 | `scaled_layout(total_lines, lines_per_file=1000, files_per_folder=20)` | 合計 `total_lines` 行の `layout` を返す（A-2 の 100 万行など）。100 万行のツリーは1秒ほどで作れる。 |
 | `make_text_pdf(path, pages=3, size=A4)` | 埋め込みテキストつきの PDF を作る。`pages` がページの数なら、どのページにも上端の `SPEC-DOC-0001`、本文の2行、右下のページ番号を置く。`[(x, y, 文字列[, 大きさ]), …]` のページのリストで、置く所を決められる（左上からのポイント。y は文字の下端。文字列は ASCII）。2,000 ページで1秒ほど。 |
 | `make_image_pdf(path, pages=2, size=A4)` | 画像だけの PDF（文字の数が 0）を Pillow で作る。各ページに箱と線の図がある。 |
-| `make_unmapped_pdf(path, pages=1, text="ABCDEF", mapped="")` | 文字を Unicode に対応づけられない PDF を作る。`text` の全部の文字で `FPDFText_HasUnicodeMapError` が 1 になる（SR-37、A-9）。`text` は英大文字だけ。`mapped` は、対応づけられる文字（Helvetica）として足す ASCII の文字列で、対応づけられない文字の割合を決めるのに使う。 |
+| `make_unmapped_pdf(path, pages=1, text="ABCDEF", mapped="")` | 文字を Unicode に対応づけられない PDF を作る。`text` の全部の文字で `FPDFText_HasUnicodeMapError` が 1 になる（SR-37、A-9）。`text` は英大文字だけ。`mapped` は、対応づけられる文字（Helvetica）として足す ASCII の文字列で、対応づけられない文字の割合を決めるのに使う。`text` と `mapped` をページごとのリストにすると、ページごとに割合を変えられる（`pages` はリストの長さになる）。 |
 
 ## 担当エージェントの代わり
 

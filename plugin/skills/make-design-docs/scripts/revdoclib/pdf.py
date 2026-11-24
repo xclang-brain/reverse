@@ -125,10 +125,22 @@ def find_margins(pages):
     return found
 
 
+def _unmapped_chars(textpage):
+    """(文字の数, Unicode に対応づけられない文字の数) を返す（SR-37）。"""
+    import pypdfium2.raw as raw
+
+    n = textpage.count_chars()
+    return n, sum(1 for c in range(n) if raw.FPDFText_HasUnicodeMapError(textpage.raw, c) == 1)
+
+
+def _mapped_enough(total, unmapped):
+    """対応づけられない文字の割合が、上限以下か（SR-37）。"""
+    return unmapped <= total * values.UNMAPPED_RATIO
+
+
 def read_pdf(path):
     """(ページの数, text_check, margins, line_numbers) を返す。開けないときと、0 ページのときは ValueError。"""
     import pypdfium2 as pdfium
-    import pypdfium2.raw as raw
 
     try:
         doc = pdfium.PdfDocument(path)
@@ -142,9 +154,9 @@ def read_pdf(path):
         for k in range(len(doc)):
             page = doc[k]
             textpage = page.get_textpage()
-            n = textpage.count_chars()
+            n, bad = _unmapped_chars(textpage)
             total += n
-            unmapped += sum(1 for c in range(n) if raw.FPDFText_HasUnicodeMapError(textpage.raw, c) == 1)
+            unmapped += bad
             width, height = page.get_size()
             pages.append(text_units(textpage, width, height))
             numbered += bool(line_numbers(page_text(textpage)))
@@ -152,7 +164,7 @@ def read_pdf(path):
             page.close()
     finally:
         doc.close()
-    text_check = total > 0 and unmapped / total <= values.UNMAPPED_RATIO
+    text_check = total > 0 and _mapped_enough(total, unmapped)
     return len(pages), text_check, find_margins(pages), numbered * 2 >= len(pages)
 
 
@@ -188,7 +200,8 @@ def prepare_pages(path, info, pages, folder):
                 units = [{"text": t, "box": b, "margin": is_margin(t, b, info["margins"])}
                          for t, b in text_units(textpage, width, height)]
                 _strip_units(units, nums)
-                check = info["text_check"] and any(check_strings(u["text"]) for u in units if not u["margin"])
+                check = (info["text_check"] and _mapped_enough(*_unmapped_chars(textpage))
+                         and any(check_strings(u["text"]) for u in units if not u["margin"]))
                 files.write_text(base + ".json", files.dumps(
                     {"page": n, "size": [width, height], "check": check, "units": units}))
             textpage.close()

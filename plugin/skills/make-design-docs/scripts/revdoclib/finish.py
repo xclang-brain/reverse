@@ -3,10 +3,11 @@ import json
 import os
 import posixpath
 import re
+import shutil
 
 from . import files, init, jobchecks, markdown, values
 from . import plan as planmod
-from .common import Fail
+from .common import SCRIPTS_DIR, Fail
 from .scriptwork import PAGE_MARK
 
 MARK_NOTES = ("- 【既存設計書のみ】：既存の設計書から取った内容である。ソースコードでは確かめていない。"
@@ -16,6 +17,7 @@ REVIEW_DIR = "docs/review"
 DIFF_KINDS = {"missing": "欠け", "extra": "余分"}
 _PLAIN_PATH = re.compile(r"[A-Za-z0-9._\-/~]+")
 
+# search の separator を変えるときは、scripts/search_hook.py の SEPARATOR も直す。
 MKDOCS_FIXED = r"""docs_dir: docs
 site_dir: site
 theme:
@@ -31,6 +33,8 @@ plugins:
       pipeline: []
   - privacy:
       cache_dir: .work/privacy
+hooks:
+  - .work/search_hook.py
 markdown_extensions:
   - tables
   - pymdownx.superfences:
@@ -415,6 +419,7 @@ def _yaml(items, indent):
 def _mkdocs(ctx):
     text = "site_name: %s\n%s" % (_quote(_site_name(ctx.plan)), MKDOCS_FIXED)
     files.write_text(ctx.abs("mkdocs.yml"), text + _text(_yaml(_nav(ctx), "  ")))
+    shutil.copyfile(os.path.join(SCRIPTS_DIR, "search_hook.py"), ctx.abs(".work/search_hook.py"))
 
 
 def run(ctx):

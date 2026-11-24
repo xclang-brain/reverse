@@ -270,20 +270,21 @@ def test_convert_bare_name_two_pages_away(tmp_path):
 
 
 def test_check_legacy_bare_name_neighbor_page(tmp_path):
-    """A-8：check は、docs/legacy/ の bare_name に、同じ PDF の P−1、P、P+1 のページのコードスパンだけを使う（SR-32。9章、6.2）。"""
+    """A-8：check は、docs/legacy/ の bare_name に、識別子の形の語だけを調べる。前後のページでコードスパンになっている語は、囲まずに書いても合格する（SR-69。9章）。"""
     out = _far_pages(tmp_path)
     r = helpers.run_to_done(out, pdf=tmp_path / "pdf" / "spec.pdf")
     assert r.ok and r.data["state"] == "done", r.data
-    r = helpers.revdoc("check", out)
-    assert r.ok and r.data["passed"], r.data  # 1 ページ目と 3 ページ目は前後のページでない
     path = out / "docs" / "legacy" / "spec" / "001.md"
     text = helpers.read_text(path)
     _write(out, "docs/legacy/spec/001.md", _edit(text, [("本文。", "Schedule を呼ぶ。")]))  # 2 ページ目
     r = helpers.revdoc("check", out)
+    assert r.ok and r.data["passed"], r.data  # 1 ページ目の `Schedule` の隣のページでも合格する
+    _write(out, "docs/legacy/spec/001.md", _edit(text, [("本文。", "Schedule を呼ぶ。\n\ntnum_task と TaskId を呼ぶ。")]))
+    r = helpers.revdoc("check", out)
     assert r.ok and not r.data["passed"], r.data
     lines = helpers.read_text(path).splitlines()
     found = [x for x in r.data["problems"] if x["rule"] == "bare_name"]
-    assert [lines.index("Schedule を呼ぶ。") + 1] == [x["line"] for x in found], found
+    assert {lines.index("tnum_task と TaskId を呼ぶ。") + 1} == {x["line"] for x in found}, found
 
 
 def test_convert_bare_name_page_of_done_job(tmp_path):
@@ -436,16 +437,29 @@ def test_convert_retry(tmp_path):
                  id="unmapped_over_5_percent"),
     pytest.param(lambda p: helpers.make_unmapped_pdf(p, text="A", mapped="B" * 99), True, [True], "text_extra",
                  id="unmapped_under_5_percent"),
+    # 1 ページ目だけ 3 / 45 前後で 5% を超え、PDF の全体では 3 / 165 前後で超えない
+    pytest.param(lambda p: helpers.make_unmapped_pdf(p, text=["ABC", "", ""], mapped=["B" * 40, "B" * 60, "B" * 60]),
+                 True, [False, True, True], "text_extra", id="unmapped_page_over_5_percent"),
 ])
 def test_text_check_decision(tmp_path, maker, text_check, checks, rule):
-    """A-9：対応づけられない文字が 5% を超える PDF、画像だけの PDF、埋め込みテキストのないページは、文字列の検査を行わない（SR-37）。"""
+    """A-9：対応づけられない文字が 5% を超える PDF とページ、画像だけの PDF、埋め込みテキストのないページは、文字列の検査を行わず、指示のファイルの表の埋め込みテキストを「なし」にする（SR-37。6.2、7.3）。"""
     out, job = _convert_start(tmp_path, maker)
     assert helpers.read_plan(out)["pdfs"][0]["text_check"] is text_check
     outputs = sorted(job["outputs"])
     assert [helpers.read_json(Path(out) / (rel[:-3] + ".json"))["check"] for rel in outputs] == checks
+    # 指示のファイルの表（7.3）：書く先の列で行を探し、埋め込みテキストの列を見る
+    rows = [[c.strip() for c in x.strip("|").split("|")]
+            for x in helpers.read_text(Path(out) / ".work" / "jobs" / (job["id"] + ".md")).splitlines()
+            if x.startswith("|")]
+    for rel, check in zip(outputs, checks):
+        cells = next(c for c in rows if c[-1].endswith(rel))
+        assert cells[2].endswith(".txt") if check else cells[2] == "なし", cells
     for rel in outputs:
         _write(out, rel, "Zulu yankee\n")
-    _next_and_assert(out, job["id"], rule)
+    job = _next_and_assert(out, job["id"], rule)
+    # 文字列の検査を行わないページには、埋め込みテキストと違う文字を書いても、文字列の指摘が出ない
+    unchecked = {rel for rel, check in zip(outputs, checks) if not check}
+    assert not [x for x in job["reasons"] if x["rule"] in ("text_missing", "text_extra") and x["file"] in unchecked], job
 
 
 # ---------------------------------------------------------------------------

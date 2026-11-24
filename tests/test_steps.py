@@ -9,6 +9,7 @@
 3. next を呼んで処理を進め、出力先のファイルと state.json を見る。
 """
 import hashlib
+import json
 import posixpath
 import re
 import shutil
@@ -63,6 +64,7 @@ MKDOCS_COMMON = {
                             "separator": r'[\s\-,:!=\[\]()"/\u3000-\u303f\u3041-\u309f\uff00-\uffef]+',
                             "pipeline": []}},
                 {"privacy": {"cache_dir": ".work/privacy"}}],
+    "hooks": [".work/search_hook.py"],
     "markdown_extensions": ["tables", {"pymdownx.superfences": {"custom_fences": [
         {"name": "mermaid", "class": "mermaid",
          "format": "!!python/name:pymdownx.superfences.fence_code_format"}]}}],
@@ -1337,6 +1339,52 @@ def test_finish_by_mode(tmp_path, mode):
     if mode == "both":
         review.insert(0, {"食い違いの一覧": "review/discrepancies.md"})
     assert _nav(data, "確認の一覧") == review
+    # 検索のフックは、プラグインの search_hook.py のコピーである
+    assert (Path(out) / ".work" / "search_hook.py").read_bytes() == SEARCH_HOOK.read_bytes()
+
+
+SEARCH_HOOK = helpers.SCRIPTS_DIR / "search_hook.py"
+WJ = "\u2060"  # 幅のない文字
+# 検索のフックが直す前と後の文字列（10章）。漢字の直後が、区切りの文字（空白、ひらがな、、、括弧）、`<`、
+# 文字列の終わりである所に入れ、カタカナ、英数字、漢字が続く所には入れない
+HOOK_CASES = [
+    ("初期化", "初期化" + WJ),
+    ("初期化 処理", "初期化" + WJ + " 処理" + WJ),
+    ("初期化の処理", "初期化" + WJ + "の処理" + WJ),
+    ("初期化、(設定)", "初期化" + WJ + "、(設定" + WJ + ")"),
+    ("<p>初期化</p>", "<p>初期化" + WJ + "</p>"),
+    ("初期化データ", "初期化データ"),
+    ("初期化ABC 1件", "初期化ABC 1件" + WJ),
+    ("\U00020BB7", "\U00020BB7" + WJ),
+    ("Task", "Task"),
+]
+
+
+def test_search_hook(tmp_path, monkeypatch):
+    """A-8：検索のフックは、ビルドの後の検索の索引の title と text の、漢字の直後が区切りの文字、`<`、文字列の終わりである所に U+2060 を入れる。2回当てても変わらず、索引がないときは何もしない（SR-68。10章）。"""
+    import importlib.util
+    monkeypatch.setattr("sys.dont_write_bytecode", True)  # プラグインのフォルダに __pycache__ を作らない
+    spec = importlib.util.spec_from_file_location("search_hook", str(SEARCH_HOOK))
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    assert getattr(hook.on_post_build, "mkdocs_priority", None) == -100  # ほかのプラグインの後に動く
+
+    site = tmp_path / "site"
+    hook.on_post_build(config={"site_dir": str(site)})  # 索引がない
+    assert not site.exists()
+
+    path = site / "search" / "search_index.json"
+    path.parent.mkdir(parents=True)
+    conf = {"lang": ["en"], "separator": MKDOCS_COMMON["plugins"][0]["search"]["separator"], "pipeline": []}
+    docs = [{"location": "p%d/" % i, "title": a, "text": "x " + a} for i, (a, _) in enumerate(HOOK_CASES)]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"config": conf, "docs": docs}, f, ensure_ascii=False)
+    expected = {"config": conf,
+                "docs": [{"location": "p%d/" % i, "title": b, "text": "x " + b} for i, (_, b) in enumerate(HOOK_CASES)]}
+    hook.on_post_build(config={"site_dir": str(site)})
+    assert helpers.read_json(path) == expected
+    hook.on_post_build(config={"site_dir": str(site)})
+    assert helpers.read_json(path) == expected
 
 
 def test_mkdocs_nav_and_split_module(tmp_path):

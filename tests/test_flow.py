@@ -23,6 +23,9 @@ NO_OUTPUT_DO = ("Tell the user in Japanese that the subagents wrote no files and
                 " again resumes the work.")
 INPUT_CHANGED_DO = ("Tell the user in Japanese what the message says and that they can either restore the input"
                     " and run the same skill command again, or choose a new output folder to start over. Then stop.")
+# 検索のフック（10章）が直す所：漢字の直後が、区切りの文字（mkdocs.yml の separator）、`<`、文字列の終わりである所
+KANJI = r"[\u2e80-\u2fdf\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0003134f]"
+KANJI_END = re.compile(KANJI + r'(?=[\s\-,:!=\[\]()"/\u3000-\u303f\u3041-\u309f\uff00-\uffef<]|\Z)')
 # 4.2 の段階の順と、担当エージェント
 STAGES = ["analyze", "convert", "match", "write_module", "verify_module", "write_overall", "verify_overall"]
 AGENTS = {"analyze": "reverse:code-analyst", "convert": "reverse:pdf-converter", "match": "reverse:doc-matcher",
@@ -163,6 +166,12 @@ def test_full_run(tmp_path, mode):
 
     b = helpers.mkdocs_build(out)
     assert b.returncode == 0, b.stderr.decode("utf-8", "replace")
+    # 検索の索引に、漢字で終わる語が残らない（SR-68。10章の検索のフック）
+    index = helpers.read_json(out / "site" / "search" / "search_index.json")
+    texts = [d[k] for d in index["docs"] for k in ("title", "text")]
+    assert any(re.search(KANJI, t) for t in texts)
+    left = [t[m.start():m.start() + 20] for t in texts for m in KANJI_END.finditer(t)]
+    assert left == [], left
     assert [helpers.tree_hashes(p) for p in inputs] == before
     assert helpers.tree_hashes(helpers.REPO / "plugin") == plugin_before
     assert list(cwd.iterdir()) == []
